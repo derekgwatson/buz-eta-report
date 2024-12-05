@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Edit Customer</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f4f4f9;
+            margin: 0;
+            padding: 20px;
+        }
+        form {
+            max-width: 600px;
+            margin: 0 auto;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        form label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: bold;
+        }
+        form input, form button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        form button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+        }
+        form button:hover {
+            background-color: #45a049;
+        }
+    </style>
+</head>
+<body>
+    <form method="post">
+        <h2>Edit Customer</h2>
+        <label for="name">Customer Name:</label>
+        <input type="text" id="name" name="name" value="{{ customer[1] }}" required>
+
+        <label for="url">Report URL:</label>
+        <input type="url" id="url" name="url" value="{{ customer[2] }}" required>
+
+        <label for="title">Report Title:</label>
+        <input type="text" id="title" name="title" value="{{ customer[3] }}" required>
+
+        <button type="submit">Save Changes</button>
+    </form>
+</body>
+</html>
