@@ -17,11 +17,29 @@
             color: white;
             padding: 15px 20px;
             text-align: center;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        header h1 {
+            margin: 0;
+        }
+        header a {
+            color: white;
+            text-decoration: none;
+            font-size: 1em;
+            background: #f44336;
+            padding: 10px 15px;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+        header a:hover {
+            background: #d32f2f;
         }
         main {
             padding: 20px;
             max-width: 900px;
-            margin: 0 auto;
+            margin: 20px auto;
             background-color: white;
             border-radius: 8px;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
@@ -61,10 +79,6 @@
         table, th, td {
             border: 1px solid #ddd;
         }
-        table td {
-            max-width: 250px;
-            overflow-wrap: anywhere;
-        }
         th, td {
             padding: 10px;
             text-align: left;
@@ -84,11 +98,11 @@
             text-decoration: underline;
         }
     </style>
-
 </head>
 <body>
 <header>
     <h1>Admin Dashboard</h1>
+    <a href="{{ url_for('logout') }}">Logout</a>
 </header>
 <main>
     <h2>Add New Customer</h2>
@@ -120,17 +134,13 @@
 
         function copyToClipboard(relativeUrl, button) {
             const fullUrl = `${window.location.origin}${relativeUrl}`;
-            console.log(`Attempting to copy: ${fullUrl}`); // Debugging: Log the full URL
-
             navigator.clipboard.writeText(fullUrl).then(() => {
-                console.log('Text copied successfully'); // Debugging: Confirm successful copy
                 button.textContent = 'Copied!';
                 setTimeout(() => (button.textContent = 'Copy URL'), 2000);
             }).catch(err => {
-                console.error('Failed to copy text: ', err); // Debugging: Log any errors
+                console.error('Failed to copy text: ', err);
             });
         }
-
     </script>
 
     <h2>Existing Customers</h2>
@@ -155,10 +165,9 @@
                     <button onclick="copyToClipboard('{{ url_for('show_report', obfuscated_id=customer[3]) }}', this)">Copy URL</button>
                 </td>
                 <td class="actions">
-                    <a href="{{ url_for('edit_customer', customer_id=customer[0]) }}" style="color: blue; font-weight: bold;">Edit</a> |
+                    <a href="{{ url_for('edit_customer', customer_id=customer[0]) }}">Edit</a> |
                     <a href="{{ url_for('delete_customer', customer_id=customer[0]) }}"
-                       onclick="return confirm('Are you sure you want to delete {{ customer[1] }}?');"
-                       style="color: green; font-weight: bold;">
+                       onclick="return confirm('Are you sure you want to delete {{ customer[1] }}?');">
                        Delete
                     </a>
                 </td>
@@ -166,9 +175,6 @@
             {% endfor %}
         </tbody>
     </table>
-
-
-
 </main>
 </body>
 </html>
