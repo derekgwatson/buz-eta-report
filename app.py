@@ -1,14 +1,14 @@
-import requests
 import os
 import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, jsonify
 import secrets
-from services import sales_report
+from services.buz_data import get_open_orders, get_schedule_jobs_details
 
 app = Flask(__name__)
 
 # Database file path
 DB_PATH = 'customers.db'
+
 
 # Function to initialize the database
 def init_db():
@@ -46,6 +46,7 @@ def query_db(query, args=(), one=False):
 def home():
     return "Welcome to the Reporting System"
 
+
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST':
@@ -65,6 +66,7 @@ def admin():
     customers = query_db("SELECT id, name, obfuscated_id, url, title FROM customers")
     return render_template('admin.html', customers=customers)
 
+
 @app.route('/reports/<obfuscated_id>')
 def show_report(obfuscated_id):
     customer = query_db("SELECT name FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
@@ -72,13 +74,9 @@ def show_report(obfuscated_id):
         return "Report not found", 404
 
     try:
-        print(f"Customer is {customer[0]}")
         # Fetch data for both instances
-        data_dd = sales_report.get_data(customer[0], "DESDR",
-                                           os.getenv("BUZMANAGER_USERNAME_DD"), os.getenv("BUZMANAGER_PASSWORD_DD"))
-
-        data_cbr = sales_report.get_data(customer[0], "WATSO",
-                                           os.getenv("BUZMANAGER_USERNAME_CBR"), os.getenv("BUZMANAGER_PASSWORD_CBR"))
+        data_dd = get_open_orders(customer[0], "DD")
+        data_cbr = get_open_orders(customer[0], "CBR")
 
         # Combine the results
         combined_data = data_cbr + data_dd
@@ -91,6 +89,7 @@ def show_report(obfuscated_id):
 def delete_customer(customer_id):
     query_db("DELETE FROM customers WHERE id = ?", (customer_id,))
     return redirect(url_for('admin'))
+
 
 @app.route('/edit/<int:customer_id>', methods=['GET', 'POST'])
 def edit_customer(customer_id):
@@ -120,7 +119,14 @@ def edit_customer(customer_id):
 @app.route('/jobs-schedule/<order_no>', methods=['GET'])
 def jobs_schedule(order_no):
     """Route to fetch JobsScheduleDetails for a given order number."""
-    data = sales_report.get_schedule_jobs_details(order_no)
+    data = get_schedule_jobs_details(order_no, "JobsScheduleDetailed", "DD")
+    return jsonify(data)
+
+
+@app.route('/wip/<order_no>', methods=['GET'])
+def work_in_progress(order_no):
+    """Route to fetch WorkInProgress for a given order number."""
+    data = get_schedule_jobs_details(order_no, "WorkInProgress")
     return jsonify(data)
 
 
