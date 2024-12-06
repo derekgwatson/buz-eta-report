@@ -1,13 +1,100 @@
 import os
 import sqlite3
-from flask import Flask, render_template, request, redirect, url_for, jsonify
+
+from dotenv import load_dotenv
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session
 import secrets
 from services.buz_data import get_open_orders, get_schedule_jobs_details
+from authlib.integrations.flask_client import OAuth
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
+from datetime import timedelta
+
+
+permanent_session_lifetime = timedelta(minutes=30)
+
+
+# Load environment variables from .env
+load_dotenv()
 
 app = Flask(__name__)
+app.secret_key = os.getenv("FLASK_SECRET")
+
+# Initialize OAuth and LoginManager
+oauth = OAuth(app)
+login_manager = LoginManager()
+login_manager.init_app(app)
+
+google = oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    access_token_url="https://oauth2.googleapis.com/token",
+    authorize_url="https://accounts.google.com/o/oauth2/auth",
+    api_base_url="https://www.googleapis.com/oauth2/v1/",
+    userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
+    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",  # Explicit JWKS URI
+    client_kwargs={"scope": "openid email profile"},
+)
+
+
+# Mock User class for simplicity
+class User(UserMixin):
+    def __init__(self, id_, name, email):
+        self.id = id_
+        self.name = name
+        self.email = email
+
+
+users = {}  # A simple in-memory user store
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    return users.get(user_id)
+
+
+@app.route("/login")
+def login():
+    return google.authorize_redirect(url_for("callback", _external=True))
+
+
+@app.route("/callback")
+def callback():
+    token = google.authorize_access_token()
+    print("Token:", token)  # Debugging
+    user_info = google.get("userinfo").json()
+    print("User Info:", user_info)  # Debugging
+
+    # Use email as the unique user identifier
+    user_email = user_info.get("email")
+    if not user_email:
+        return "Error: Missing email in user info", 400
+
+    # Restrict access to allowed users
+    if user_email not in ALLOWED_USERS:
+        return "Access denied", 403
+
+    # Use email as the user_id and proceed with login
+    user_id = user_email
+    user_name = user_info.get("name", "Unknown")  # Optional, for display purposes
+
+    # Create the user and log them in
+    user = User(id_=user_id, name=user_name, email=user_email)
+    users[user_id] = user
+    login_user(user)
+
+    return redirect(url_for("admin"))
+
+
+@app.route("/logout")
+@login_required
+def logout():
+    logout_user()
+    return render_template('home.html')
+
 
 # Database file path
-DB_PATH = 'customers.db'
+DB_PATH = os.getenv("DATABASE_PATH", "customers.db")
 
 
 # Function to initialize the database
@@ -26,27 +113,34 @@ def init_db():
                 ''')
                 conn.commit()
                 print("Database and table created successfully")
-    except Exception as e:
-        print(f"Error initializing database: {e}")
-        raise
+    except sqlite3.Error as e:
+        print(f"Database initialization error: {e}")
 
 
 # Helper function to interact with the database
 def query_db(query, args=(), one=False):
-    with sqlite3.connect(DB_PATH) as conn:
-        cur = conn.cursor()
-        cur.execute(query, args)
-        rv = cur.fetchall()
-        conn.commit()
-        return (rv[0] if rv else None) if one else rv
+    try:
+        with sqlite3.connect(DB_PATH) as conn:
+            cur = conn.cursor()
+            cur.execute(query, args)
+            rv = cur.fetchall()
+            conn.commit()
+            return (rv[0] if rv else None) if one else rv
+    except sqlite3.Error as e:
+        print(f"Database error: {e}")
+        return None
 
 
 @app.route('/')
 def home():
-    return "Welcome to the Reporting System"
+    return render_template('home.html')
+
+
+ALLOWED_USERS = {"derek@watsonblinds.com.au"}
 
 
 @app.route('/admin', methods=['GET', 'POST'])
+@login_required
 def admin():
     if request.method == 'POST':
         dd_name = request.form['dd_name']
@@ -65,7 +159,7 @@ def admin():
     return render_template('admin.html', customers=customers)
 
 
-@app.route('/reports/<obfuscated_id>')
+@app.route('/etas/<obfuscated_id>')
 def show_report(obfuscated_id):
     customer = query_db("SELECT dd_name, cbr_name FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
     if not customer:
