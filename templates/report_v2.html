@@ -1,0 +1,90 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Sales Report</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #fdfdfd; /* Very light gray */
+            color: #333;
+        }
+        .order-header {
+            background-color: #d4e6d6; /* Soft pastel green */
+            color: #2c3e50; /* Darker gray for text */
+            font-weight: bold;
+            padding: 10px;
+            margin-top: 20px;
+            border: 1px solid #ccd4cc;
+            border-radius: 4px;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        th {
+            background-color: #daeaf6; /* Soft pastel blue */
+            color: #2c3e50;
+        }
+        tr:nth-child(even) {
+            background-color: #f7f9fc; /* Very light pastel blue-gray */
+        }
+        tr:hover {
+            background-color: #eaf2f5; /* Slightly darker pastel for hover */
+        }
+        colgroup col {
+            width: auto; /* Default for non-specified widths */
+        }
+        colgroup col:nth-child(1) { width: 30%; } /* Group */
+        colgroup col:nth-child(2) { width: 50%; } /* Item */
+        colgroup col:nth-child(3) { width: 20%; } /* Status */
+    </style>
+</head>
+<body>
+    <h1>Open Orders for {{ data[0].Customer }}</h1>
+
+    {% for RefNo, items in data|groupby("RefNo") %}
+    <!-- Order Header -->
+    <div class="order-header">
+        <strong>Supplier:</strong> {{ items[0].Instance or 'N/A' }} |
+        <strong>Date:</strong> {{ items[0].DateScheduled or 'N/A' }} |
+        <strong>Order No:</strong> {{ RefNo or 'N/A' }} |
+        <strong>Order Ref:</strong> {{ items[0].Descn or 'N/A' }}
+    </div>
+
+    <!-- Items Table -->
+    <table>
+        <!-- Define column widths -->
+        <colgroup>
+            <col>
+            <col>
+            <col>
+        </colgroup>
+        <thead>
+            <tr>
+                <th>Group</th>
+                <th>Item</th>
+                <th>Status</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td>{{ item.ProductionLine or 'N/A' }}</td>
+                <td>{{ item.InventoryItem or 'N/A' }} ({{ item.FixedLine or 'N/A' }})</td>
+                <td>{{ item.ProductionStatus or 'N/A' }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    {% endfor %}
+</body>
+</html>
