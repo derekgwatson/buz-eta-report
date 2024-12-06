@@ -43,18 +43,28 @@
     </style>
 </head>
 <body>
-    <form method="post">
+    <form method="post" id="customerForm">
         <h2>Edit Customer</h2>
-        <label for="name">Customer Name:</label>
-        <input type="text" id="name" name="name" value="{{ customer[1] }}" required>
+        <label for="dd_name">DD Name:</label>
+        <input type="text" id="dd_name" name="dd_name" value="{{ customer[1] }}">
 
-        <label for="url">Report URL:</label>
-        <input type="url" id="url" name="url" value="{{ customer[2] }}" required>
-
-        <label for="title">Report Title:</label>
-        <input type="text" id="title" name="title" value="{{ customer[3] }}" required>
+        <label for="cbr_name">Cbr Name:</label>
+        <input type="text" id="cbr_name" name="cbr_name" value="{{ customer[2] }}">
 
         <button type="submit">Save Changes</button>
     </form>
+
+<script>
+        document.getElementById('customerForm').addEventListener('submit', function(event) {
+            const ddName = document.getElementById('dd_name').value.trim();
+            const cbrName = document.getElementById('cbr_name').value.trim();
+
+            if (!ddName && !cbrName) {
+                event.preventDefault(); // Prevent form submission
+                const errorMessage = document.getElementById('error-message');
+                errorMessage.style.display = 'block'; // Show error message
+            }
+        });
+    </script>
 </body>
 </html>

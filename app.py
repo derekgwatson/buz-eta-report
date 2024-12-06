@@ -19,10 +19,9 @@ def init_db():
                 cur.execute('''
                     CREATE TABLE customers (
                         id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        name TEXT NOT NULL,
-                        obfuscated_id TEXT NOT NULL UNIQUE,
-                        url TEXT NOT NULL,
-                        title TEXT NOT NULL
+                        dd_name TEXT,
+                        cbr_name TEXT,
+                        obfuscated_id TEXT NOT NULL UNIQUE
                     )
                 ''')
                 conn.commit()
@@ -50,33 +49,32 @@ def home():
 @app.route('/admin', methods=['GET', 'POST'])
 def admin():
     if request.method == 'POST':
-        name = request.form['name']
-        url = request.form['url']
-        title = request.form['title']
+        dd_name = request.form['dd_name']
+        cbr_name = request.form['cbr_name']
         obfuscated_id = secrets.token_urlsafe(8)
 
         # Insert customer into the database
         query_db(
-            "INSERT INTO customers (name, obfuscated_id, url, title) VALUES (?, ?, ?, ?)",
-            (name, obfuscated_id, url, title),
+            "INSERT INTO customers (dd_name, cbr_name, obfuscated_id) VALUES (?, ?, ?)",
+            (dd_name, cbr_name, obfuscated_id),
         )
         return redirect(url_for('admin'))
 
     # Retrieve all customers from the database
-    customers = query_db("SELECT id, name, obfuscated_id, url, title FROM customers")
+    customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id FROM customers")
     return render_template('admin.html', customers=customers)
 
 
 @app.route('/reports/<obfuscated_id>')
 def show_report(obfuscated_id):
-    customer = query_db("SELECT name FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
+    customer = query_db("SELECT dd_name, cbr_name FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
     if not customer:
         return "Report not found", 404
 
     try:
         # Fetch data for both instances
         data_dd = get_open_orders(customer[0], "DD")
-        data_cbr = get_open_orders(customer[0], "CBR")
+        data_cbr = get_open_orders(customer[1], "CBR")
 
         # Combine the results
         combined_data = data_cbr + data_dd
@@ -95,20 +93,19 @@ def delete_customer(customer_id):
 def edit_customer(customer_id):
     if request.method == 'POST':
         # Fetch updated form data
-        name = request.form['name']
-        url = request.form['url']
-        title = request.form['title']
+        dd_name = request.form['dd_name']
+        cbr_name = request.form['cbr_name']
 
         # Update the customer in the database
         query_db(
-            "UPDATE customers SET name = ?, url = ?, title = ? WHERE id = ?",
-            (name, url, title, customer_id),
+            "UPDATE customers SET cbr_name = ?, dd_name = ? WHERE id = ?",
+            (cbr_name, dd_name, customer_id),
         )
         return redirect(url_for('admin'))
 
     # Fetch customer details for pre-filling the form
     customer = query_db(
-        "SELECT id, name, url, title FROM customers WHERE id = ?", (customer_id,), one=True
+        "SELECT id, dd_name, cbr_name FROM customers WHERE id = ?", (customer_id,), one=True
     )
     if not customer:
         return "Customer not found", 404

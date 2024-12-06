@@ -84,6 +84,7 @@
             text-decoration: underline;
         }
     </style>
+
 </head>
 <body>
 <header>
@@ -91,28 +92,54 @@
 </header>
 <main>
     <h2>Add New Customer</h2>
-    <form method="post">
-        <label for="name">Customer Name:</label>
-        <input type="text" id="name" name="name" required>
+    <form method="post" id="customerForm">
+        <label for="dd_name">DD Name:</label>
+        <input type="text" id="dd_name" name="dd_name">
 
-        <label for="url">Report URL:</label>
-        <input type="url" id="url" name="url" required>
+        <label for="cbr_name">Cbr Name:</label>
+        <input type="text" id="cbr_name" name="cbr_name">
 
-        <label for="title">Report Title:</label>
-        <input type="text" id="title" name="title" required>
+        <span id="error-message" style="color: red; display: none;" aria-live="polite">
+            Please fill in at least one field.
+        </span>
 
         <button type="submit">Add Customer</button>
     </form>
+
+    <script>
+        document.getElementById('customerForm').addEventListener('submit', function(event) {
+            const ddName = document.getElementById('dd_name').value.trim();
+            const cbrName = document.getElementById('cbr_name').value.trim();
+
+            if (!ddName && !cbrName) {
+                event.preventDefault(); // Prevent form submission
+                const errorMessage = document.getElementById('error-message');
+                errorMessage.style.display = 'block'; // Show error message
+            }
+        });
+
+        function copyToClipboard(relativeUrl, button) {
+            const fullUrl = `${window.location.origin}${relativeUrl}`;
+            console.log(`Attempting to copy: ${fullUrl}`); // Debugging: Log the full URL
+
+            navigator.clipboard.writeText(fullUrl).then(() => {
+                console.log('Text copied successfully'); // Debugging: Confirm successful copy
+                button.textContent = 'Copied!';
+                setTimeout(() => (button.textContent = 'Copy URL'), 2000);
+            }).catch(err => {
+                console.error('Failed to copy text: ', err); // Debugging: Log any errors
+            });
+        }
+
+    </script>
 
     <h2>Existing Customers</h2>
     <table>
         <thead>
             <tr>
-                <th>Name</th>
-                <th>Obfuscated ID</th>
-                <th>Report URL</th>
-                <th>Customer Access URL</th>
-                <th>Title</th>
+                <th>DD Name</th>
+                <th>Cbr Name</th>
+                <th>URL</th>
                 <th>Actions</th>
             </tr>
         </thead>
@@ -122,16 +149,11 @@
                 <td>{{ customer[1] }}</td>
                 <td>{{ customer[2] }}</td>
                 <td>
-                    <a href="{{ customer[3] }}" target="_blank" title="{{ customer[3] }}">
-                        {{ customer[3][:20] }}...{{ customer[3][-10:] }}
+                    <a href="{{ url_for('show_report', obfuscated_id=customer[3]) }}" id="url-{{ loop.index }}">
+                        {{ url_for('show_report', obfuscated_id=customer[3]) }}
                     </a>
+                    <button onclick="copyToClipboard('{{ url_for('show_report', obfuscated_id=customer[3]) }}', this)">Copy URL</button>
                 </td>
-                <td>
-                    <a href="{{ request.host_url }}reports/{{ customer[2] }}" target="_blank">
-                        {{ request.host_url }}reports/{{ customer[2] }}
-                    </a>
-                </td>
-                <td>{{ customer[4] }}</td>
                 <td class="actions">
                     <a href="{{ url_for('edit_customer', customer_id=customer[0]) }}" style="color: blue; font-weight: bold;">Edit</a> |
                     <a href="{{ url_for('delete_customer', customer_id=customer[0]) }}"
