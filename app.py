@@ -8,10 +8,10 @@ from services.buz_data import get_open_orders, get_schedule_jobs_details
 from authlib.integrations.flask_client import OAuth
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from datetime import timedelta
+import logging
 
-
+logging.basicConfig(level=logging.DEBUG)
 permanent_session_lifetime = timedelta(minutes=30)
-
 
 # Load environment variables from .env
 load_dotenv()
@@ -77,6 +77,8 @@ def callback():
     # Restrict access to allowed users
     if user_email not in ALLOWED_USERS:
         return render_template('403.html'), 403
+
+    session.permanent = True
 
     # Use email as the user_id and proceed with login
     user_id = user_email
