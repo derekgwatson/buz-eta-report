@@ -76,7 +76,7 @@ def callback():
 
     # Restrict access to allowed users
     if user_email not in ALLOWED_USERS:
-        return "Access denied", 403
+        return render_template('403.html'), 403
 
     # Use email as the user_id and proceed with login
     user_id = user_email
@@ -173,18 +173,20 @@ def show_report(obfuscated_id):
 
         # Combine the results
         combined_data = data_cbr + data_dd
-        return render_template('report_v2.html', data=combined_data)
+        return render_template('report.html', data=combined_data)
     except Exception as e:
         return f"Error generating sales report: {e}", 500
 
 
 @app.route('/delete/<int:customer_id>')
+@login_required
 def delete_customer(customer_id):
     query_db("DELETE FROM customers WHERE id = ?", (customer_id,))
     return redirect(url_for('admin'))
 
 
 @app.route('/edit/<int:customer_id>', methods=['GET', 'POST'])
+@login_required
 def edit_customer(customer_id):
     if request.method == 'POST':
         # Fetch updated form data
@@ -209,6 +211,7 @@ def edit_customer(customer_id):
 
 
 @app.route('/jobs-schedule/<order_no>', methods=['GET'])
+@login_required
 def jobs_schedule(order_no):
     """Route to fetch JobsScheduleDetails for a given order number."""
     data = get_schedule_jobs_details(order_no, "JobsScheduleDetailed", "DD")
@@ -216,13 +219,54 @@ def jobs_schedule(order_no):
 
 
 @app.route('/wip/<order_no>', methods=['GET'])
+@login_required
 def work_in_progress(order_no):
     """Route to fetch WorkInProgress for a given order number."""
     data = get_schedule_jobs_details(order_no, "WorkInProgress")
     return jsonify(data)
 
 
+# Error Handlers
+@app.errorhandler(401)
+def forbidden(error):
+    return render_template('401.html'), 401
+
+
+@app.errorhandler(403)
+def forbidden(error):
+    return render_template('403.html'), 403
+
+
+@app.errorhandler(404)
+def page_not_found(error):
+    return render_template('404.html'), 404
+
+
+@app.errorhandler(405)
+def page_not_found(error):
+    return render_template('405.html'), 405
+
+
+@app.errorhandler(429)
+def page_not_found(error):
+    return render_template('429.html'), 429
+
+
+@app.errorhandler(500)
+def internal_server_error(error):
+    return render_template('500.html'), 500
+
+
+@app.route('/500')
+def error500():
+    return 1/0
+
+
+FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
+FLASK_ENV = os.getenv("FLASK_ENV", "production")
+
+
 if __name__ == '__main__':
     # Initialize the database when the app starts
     init_db()
-    app.run(debug=True)
+    app.run(debug=FLASK_DEBUG, env=FLASK_ENV)

@@ -3,22 +3,203 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{{ customer_title }}</title>
+    <title>Sales Report</title>
     <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            height: 100%;
-            width: 100%;
+        body {
+            font-family: Arial, sans-serif;
+            margin: 20px;
+            background-color: #fdfdfd;
+            color: #333;
         }
-        iframe {
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+        }
+
+        h1 {
+            margin: 0;
+        }
+
+        .logo {
+            max-height: 50px;
+        }
+
+        .container {
+            display: flex;
+            transition: all 0.3s ease-in-out;
+        }
+
+        .content {
+            flex: 1; /* Fully takes available space */
+            transition: all 0.3s ease-in-out;
+        }
+
+        .sidebar {
+            flex: 0 0 300px; /* Fixed width for the sidebar */
+            max-width: 300px;
+            margin-top: 20px; /* Move sidebar down */
+            border: 1px solid #ddd;
+            padding: 15px;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            transition: all 0.3s ease-in-out;
+            overflow: hidden;
+        }
+
+        .sidebar.hidden {
+            flex: 0 0 0; /* Fully collapse the sidebar */
+            max-width: 0; /* Prevent it from reserving space */
+            padding: 0; /* Remove padding */
+            border: none; /* Remove border */
+        }
+
+        .toggle-sidebar {
+            position: absolute;
+            top: 90px; /* Below the logo */
+            right: 20px; /* Stick to the edge of the screen */
+            padding: 10px 15px;
+            background-color: #4CAF50;
+            color: white;
             border: none;
-            height: 100%;
-            width: 100%;
+            border-radius: 5px;
+            cursor: pointer;
+            z-index: 1000; /* Ensure it’s always on top */
+        }
+
+        .toggle-sidebar:hover {
+            background-color: #45a049;
+        }
+
+        .order-header {
+            background-color: #d4e6d6;
+            color: #2c3e50;
+            font-weight: bold;
+            padding: 10px;
+            margin-top: 20px;
+            border: 1px solid #ccd4cc;
+            border-radius: 4px;
+        }
+
+        table {
+            width: 100%; /* Make the table take full width */
+            border-collapse: collapse;
+            margin-bottom: 20px;
+        }
+
+        th, td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+
+        th {
+            background-color: #daeaf6;
+            color: #2c3e50;
+        }
+
+        tr:nth-child(even) {
+            background-color: #f7f9fc;
+        }
+
+        tr:hover {
+            background-color: #eaf2f5;
         }
     </style>
 </head>
 <body>
-    <iframe src="{{ customer_url }}" allowfullscreen></iframe>
+    <div class="header">
+        <h1>Open Orders for {{ data[0].Customer }}</h1>
+        <img src="{{ url_for('static', filename='watson_logo.png') }}" alt="Watson Logo" class="logo">
+    </div>
+
+    <!-- Toggle Button -->
+    <button class="toggle-sidebar" onclick="toggleSidebar()">Toggle Sidebar</button>
+
+    <div class="container" id="container">
+        <!-- Main Content -->
+        <div class="content" id="content">
+            {% for RefNo, items in data|groupby("RefNo") %}
+            <!-- Order Header -->
+            <div class="order-header">
+                <strong>Supplier:</strong> {{ items[0].Instance or 'N/A' }} |
+                <strong>Expected:</strong> {{ items[0].DateScheduled or 'N/A' }} |
+                <strong>Order #:</strong> {{ RefNo or 'N/A' }} |
+                <strong>Ref:</strong> {{ items[0].Descn or 'N/A' }}
+            </div>
+
+            <!-- Items Table -->
+            <table>
+                <thead>
+                    <tr>
+                        <th>Group</th>
+                        <th>Item</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in items %}
+                    <tr>
+                        <td>{{ item.ProductionLine or 'N/A' }}</td>
+                        <td>{{ item.InventoryItem or 'N/A' }} ({{ item.FixedLine or 'N/A' }})</td>
+                        <td>{{ item.ProductionStatus or 'N/A' }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% endfor %}
+        </div>
+
+        <!-- Sidebar -->
+        <div class="sidebar" id="sidebar">
+            <h2>Lead Times</h2>
+            <p><strong>Date:</strong> Date order is due to be completed by our production team.</p>
+            <p><strong>Order #:</strong> Use this when making an enquiry about your order.</p>
+            <p><strong>Description:</strong> A summary of the order, generally the location. This was entered by you when creating the order.</p>
+            <p><strong>Status:</strong> The stage your order is at in our factory.</p>
+
+            <h3>Lead Times</h3>
+            <p>A confirmation email is sent when your order has been accepted. Lead times are calculated from the accepted date.</p>
+            <p>Add one week for powder coating, European and special order fabrics, and large quantity orders.</p>
+            <p>Please allow an extra one day lead time either side of the manufacturing lead times specified at the time you place your order.</p>
+            <p>Lead times do not take into account delays for out-of-stock items, query response times, or delivery to your location.</p>
+            <p>Lead times are specified in business days and do not include weekends or public holidays.</p>
+            <p>Any delays will be communicated to your nominated email address.</p>
+        </div>
+    </div>
+
+    <script>
+        // On page load, apply the user's saved sidebar state
+        window.onload = function () {
+            const sidebar = document.getElementById('sidebar');
+            const content = document.getElementById('content');
+            const sidebarState = localStorage.getItem('sidebarState'); // Get state from localStorage
+
+            if (sidebarState === 'hidden') {
+                sidebar.classList.add('hidden');
+                content.style.flex = "1 1 100%";
+            }
+        };
+
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const content = document.getElementById('content');
+
+            if (sidebar.classList.contains('hidden')) {
+                // Show the sidebar
+                sidebar.classList.remove('hidden');
+                content.style.flex = "1"; // Return to shared layout
+                localStorage.setItem('sidebarState', 'visible'); // Save state
+            } else {
+                // Hide the sidebar
+                sidebar.classList.add('hidden');
+                content.style.flex = "1 1 100%"; // Take the full width
+                localStorage.setItem('sidebarState', 'hidden'); // Save state
+            }
+        }
+    </script>
 </body>
 </html>
