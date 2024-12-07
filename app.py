@@ -164,7 +164,8 @@ def admin():
 def show_report(obfuscated_id):
     customer = query_db("SELECT dd_name, cbr_name FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
     if not customer:
-        return "Report not found", 404
+        error_message = f"No report found for ID: {obfuscated_id}"
+        return render_template('404.html', message=error_message), 404
 
     try:
         # Fetch data for both instances
@@ -175,7 +176,8 @@ def show_report(obfuscated_id):
         combined_data = data_cbr + data_dd
         return render_template('report.html', data=combined_data)
     except Exception as e:
-        return f"Error generating sales report: {e}", 500
+        error_message = f"Failed to generate report for ID: {obfuscated_id}. Error: {str(e)}"
+        return render_template('500.html', message=error_message), 500
 
 
 @app.route('/delete/<int:customer_id>')
@@ -262,11 +264,7 @@ def error500():
     return 1/0
 
 
-FLASK_DEBUG = os.getenv("FLASK_DEBUG", "False").lower() == "true"
-FLASK_ENV = os.getenv("FLASK_ENV", "production")
-
-
 if __name__ == '__main__':
     # Initialize the database when the app starts
     init_db()
-    app.run(debug=FLASK_DEBUG, env=FLASK_ENV)
+    app.run()
