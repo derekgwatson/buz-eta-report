@@ -58,6 +58,10 @@ def login():
     return google.authorize_redirect(url_for("callback", _external=True))
 
 
+# Load allowed users from environment
+ALLOWED_USERS = set(os.getenv("ALLOWED_USERS", "").split(","))
+
+
 @app.route("/callback")
 def callback():
     token = google.authorize_access_token()
@@ -134,9 +138,6 @@ def query_db(query, args=(), one=False):
 @app.route('/')
 def home():
     return render_template('home.html')
-
-
-ALLOWED_USERS = {"derek@watsonblinds.com.au"}
 
 
 @app.route('/admin', methods=['GET', 'POST'])
