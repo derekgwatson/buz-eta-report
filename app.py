@@ -2,13 +2,15 @@ import os
 import sqlite3
 
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session
+from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash
 import secrets
 from services.buz_data import get_open_orders, get_schedule_jobs_details
 from authlib.integrations.flask_client import OAuth
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from datetime import timedelta
 import logging
+from services.auth import login_manager, oauth, setup_auth_routes
+
 
 logging.basicConfig(level=logging.DEBUG)
 permanent_session_lifetime = timedelta(minutes=30)
@@ -20,14 +22,8 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET")
 
 # Initialize OAuth and LoginManager
-oauth = OAuth(app)
-login_manager = LoginManager()
 login_manager.init_app(app)
-login_manager.login_view = "login" # Set the default login view
-
-# Customize messages (optional)
-login_manager.login_message = "Please log in to access this page."
-login_manager.login_message_category = "error"
+oauth.init_app(app)
 
 
 # Handle unauthorized access by redirecting to login
@@ -35,23 +31,6 @@ login_manager.login_message_category = "error"
 def handle_unauthorized():
     app.logger.warning("Unauthorized access attempt.")
     return redirect(url_for("login"))
-
-
-google = oauth.register(
-    name="google",
-    client_id=os.getenv("GOOGLE_CLIENT_ID"),
-    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-    access_token_url="https://oauth2.googleapis.com/token",
-    authorize_url="https://accounts.google.com/o/oauth2/auth",
-    api_base_url="https://www.googleapis.com/oauth2/v1/",
-    userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
-    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
-    client_kwargs={
-        "scope": "openid email profile",
-        "token_endpoint_auth_method": "client_secret_post",
-        "prompt": "consent"
-    }
-)
 
 
 # Mock User class for simplicity
@@ -65,26 +44,9 @@ class User(UserMixin):
 users = {}  # A simple in-memory user store
 
 
-@app.before_request
-def log_request_info():
-    app.logger.debug(f"Request Path: {request.path}")
-    app.logger.debug(f"Request Headers: {request.headers}")
-    app.logger.debug(f"Session Data: {list(session.items())}")
-    app.logger.debug(f"User Authenticated: {current_user.is_authenticated}")
-
-
 @login_manager.user_loader
 def load_user(user_id):
     return users.get(user_id)
-
-
-@app.route("/login")
-def login():
-    return google.authorize_redirect(url_for("callback", _external=True))
-
-
-# Load allowed users from environment
-ALLOWED_USERS = set(os.getenv("ALLOWED_USERS", "").split(","))
 
 
 @app.route("/callback")
@@ -180,7 +142,9 @@ def admin():
 
     # Retrieve all customers from the database
     customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id FROM customers")
-    return render_template('admin.html', customers=customers)
+    if customers:
+        return render_template('admin.html', customers=customers)
+    return render_template('admin.html')
 
 
 @app.route('/etas/<obfuscated_id>')
@@ -251,7 +215,47 @@ def work_in_progress(order_no):
     return jsonify(data)
 
 
+@app.route('/status_mapping')
+@login_required
+def list_status_mappings():
+    conn = sqlite3.connect(DB_PATH)
+    mappings = get_status_mappings(conn)
+    conn.close()
+    return render_template('status_mappings.html', mappings=mappings)
+
+
 # Error Handlers
+@app.route('/status_mapping/edit/<int:mapping_id>', methods=['GET', 'POST'])
+def edit_status_mapping(mapping_id):
+    conn = sqlite3.connect(DB_PATH)
+
+    if request.method == 'POST':
+        custom_status = request.form['custom_status']
+        active = 'active' in request.form
+        edit_status_mapping(conn, mapping_id, custom_status, active)
+        conn.close()
+        return redirect(url_for('list_status_mappings'))
+
+    mapping = get_status_mapping(conn, mapping_id)
+    conn.close()
+    return render_template('edit_status_mapping.html', mapping=mapping)
+
+
+@app.route('/refresh_statuses', methods=['POST'])
+def refresh_statuses():
+    try:
+        # Call the function to refresh statuses
+        conn = sqlite3.connect(DB_PATH)
+        populate_status_mapping_table(conn)
+        conn.close()
+        flash("Statuses refreshed successfully.", "success")
+    except Exception as e:
+        flash(f"Failed to refresh statuses: {e}", "danger")
+
+    # Redirect back to the edit page
+    return redirect(url_for('list_status_mappings'))
+
+
 @app.errorhandler(401)
 def forbidden(error):
     return render_template('401.html'), 401
