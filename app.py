@@ -6,7 +6,7 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 import secrets
 from services.buz_data import get_open_orders, get_schedule_jobs_details
 from authlib.integrations.flask_client import OAuth
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
 from datetime import timedelta
 import logging
 
@@ -23,6 +23,19 @@ app.secret_key = os.getenv("FLASK_SECRET")
 oauth = OAuth(app)
 login_manager = LoginManager()
 login_manager.init_app(app)
+login_manager.login_view = "login" # Set the default login view
+
+# Customize messages (optional)
+login_manager.login_message = "Please log in to access this page."
+login_manager.login_message_category = "error"
+
+
+# Handle unauthorized access by redirecting to login
+@login_manager.unauthorized_handler
+def handle_unauthorized():
+    app.logger.warning("Unauthorized access attempt.")
+    return redirect(url_for("login"))
+
 
 google = oauth.register(
     name="google",
@@ -32,8 +45,12 @@ google = oauth.register(
     authorize_url="https://accounts.google.com/o/oauth2/auth",
     api_base_url="https://www.googleapis.com/oauth2/v1/",
     userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
-    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",  # Explicit JWKS URI
-    client_kwargs={"scope": "openid email profile"},
+    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+    client_kwargs={
+        "scope": "openid email profile",
+        "token_endpoint_auth_method": "client_secret_post",
+        "prompt": "consent"
+    }
 )
 
 
@@ -46,6 +63,14 @@ class User(UserMixin):
 
 
 users = {}  # A simple in-memory user store
+
+
+@app.before_request
+def log_request_info():
+    app.logger.debug(f"Request Path: {request.path}")
+    app.logger.debug(f"Request Headers: {request.headers}")
+    app.logger.debug(f"Session Data: {list(session.items())}")
+    app.logger.debug(f"User Authenticated: {current_user.is_authenticated}")
 
 
 @login_manager.user_loader
@@ -71,11 +96,7 @@ def callback():
 
     # Use email as the unique user identifier
     user_email = user_info.get("email")
-    if not user_email:
-        return "Error: Missing email in user info", 400
-
-    # Restrict access to allowed users
-    if user_email not in ALLOWED_USERS:
+    if not user_email or user_email not in ALLOWED_USERS:
         return render_template('403.html'), 403
 
     session.permanent = True
