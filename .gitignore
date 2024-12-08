@@ -1,5 +1,18 @@
+# secret stuff
 .env
 credentials/client_secret.json
-run.bat
-*.pyc
+
+# Python prod Virtual Environment
+venv/
+lib/
+lib64/
+bin/
+
+# Python Bytecode and Cache Files
 __pycache__/
+*.pyc
+*.pyo
+
+# Deployment Scripts (if applicable)
+deploy.sh
+run.bat
