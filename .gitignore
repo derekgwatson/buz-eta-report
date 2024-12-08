@@ -1,3 +1,5 @@
 .env
 credentials/client_secret.json
 run.bat
+*.pyc
+__pycache__/
