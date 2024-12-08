@@ -1,0 +1,46 @@
+{% extends "layout.html" %}
+
+{% block title %}Status Mappings{% endblock %}
+
+{% block content %}
+<h1>Status Mappings</h1>
+<table>
+    <tr>
+        <th>OData Status</th>
+        <th>Custom Status</th>
+        <th>Active</th>
+        <th>Actions</th>
+    </tr>
+    {% for mapping_id, odata_status, custom_status, active in mappings %}
+    <tr>
+        <td>{{ odata_status }}</td>
+        <td>{{ custom_status }}</td>
+        <td>{{ 'Yes' if active else 'No' }}</td>
+        <td>
+            <a href="{{ url_for('edit_status_mapping_route', mapping_id=mapping_id) }}">Edit</a>
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+
+<HR>
+<!-- Buttons Section -->
+<div class="button-container">
+    <form id="refreshForm" action="{{ url_for('refresh_statuses') }}" method="post">
+        <button type="submit" class="btn btn-refresh">Force Refresh from Buz</button>
+    </form>
+
+    <div id="loading" class="loading-message" style="display:none;">
+        <span>Refreshing... Please wait.</span>
+    </div>
+</div>
+
+<!-- JavaScript for Cursor Change -->
+<script>
+document.getElementById("refreshForm").addEventListener("submit", function () {
+    document.body.style.cursor = "wait";
+    document.getElementById("loading").style.display = "block";
+    document.getElementById("refreshForm").style.display = "none";
+});
+</script>
+{% endblock %}

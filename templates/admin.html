@@ -1,159 +1,35 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Admin Page</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            margin: 0;
-            padding: 0;
-            background-color: #f4f4f9;
-            color: #333;
-        }
-        header {
-            background-color: #4CAF50;
-            color: white;
-            padding: 15px 20px;
-            text-align: center;
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-        }
-        header h1 {
-            margin: 0;
-        }
-        header a {
-            color: white;
-            text-decoration: none;
-            font-size: 1em;
-            background: #f44336;
-            padding: 10px 15px;
-            border-radius: 5px;
-            transition: background 0.3s;
-        }
-        header a:hover {
-            background: #d32f2f;
-        }
-        main {
-            padding: 20px;
-            max-width: 900px;
-            margin: 20px auto;
-            background-color: white;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-        h1, h2 {
-            color: #4CAF50;
-        }
-        form {
-            margin-bottom: 30px;
-        }
-        form label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: bold;
-        }
-        form input, form button {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-        }
-        form button {
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        form button:hover {
-            background-color: #45a049;
-        }
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            margin-top: 20px;
-        }
-        table, th, td {
-            border: 1px solid #ddd;
-        }
-        th, td {
-            padding: 10px;
-            text-align: left;
-        }
-        th {
-            background-color: #f4f4f9;
-        }
-        tr:hover {
-            background-color: #f1f1f1;
-        }
-        .actions a {
-            text-decoration: none;
-            color: #4CAF50;
-            font-weight: bold;
-        }
-        .actions a:hover {
-            text-decoration: underline;
-        }
-    </style>
-</head>
-<body>
-<header>
-    <h1>Admin Dashboard</h1>
-    <a href="{{ url_for('logout') }}">Logout</a>
-</header>
-<main>
-    <h2>Add New Customer</h2>
-    <form method="post" id="customerForm">
-        <label for="dd_name">DD Name:</label>
-        <input type="text" id="dd_name" name="dd_name">
+{% extends "layout.html" %}
 
-        <label for="cbr_name">Cbr Name:</label>
-        <input type="text" id="cbr_name" name="cbr_name">
+{% block title %}Admin Page{% endblock %}
 
-        <span id="error-message" style="color: red; display: none;" aria-live="polite">
-            Please fill in at least one field.
-        </span>
+{% block content %}
+<h2>Add New Customer</h2>
+<form method="post" id="customerForm">
+    <label for="dd_name">DD Name:</label>
+    <input type="text" id="dd_name" name="dd_name">
 
-        <button type="submit">Add Customer</button>
-    </form>
+    <label for="cbr_name">Cbr Name:</label>
+    <input type="text" id="cbr_name" name="cbr_name">
 
-    <script>
-        document.getElementById('customerForm').addEventListener('submit', function(event) {
-            const ddName = document.getElementById('dd_name').value.trim();
-            const cbrName = document.getElementById('cbr_name').value.trim();
+    <span id="error-message" style="color: red; display: none;" aria-live="polite">
+        Please fill in at least one field.
+    </span>
 
-            if (!ddName && !cbrName) {
-                event.preventDefault(); // Prevent form submission
-                const errorMessage = document.getElementById('error-message');
-                errorMessage.style.display = 'block'; // Show error message
-            }
-        });
+    <button type="submit">Add Customer</button>
+</form>
 
-        function copyToClipboard(relativeUrl, button) {
-            const fullUrl = `${window.location.origin}${relativeUrl}`;
-            navigator.clipboard.writeText(fullUrl).then(() => {
-                button.textContent = 'Copied!';
-                setTimeout(() => (button.textContent = 'Copy URL'), 2000);
-            }).catch(err => {
-                console.error('Failed to copy text: ', err);
-            });
-        }
-    </script>
-
-    <h2>Existing Customers</h2>
-    <table>
-        <thead>
-            <tr>
-                <th>DD Name</th>
-                <th>Cbr Name</th>
-                <th>URL</th>
-                <th>Actions</th>
-            </tr>
-        </thead>
-        <tbody>
+<h2>Existing Customers</h2>
+<table>
+    <thead>
+        <tr>
+            <th>DD Name</th>
+            <th>Cbr Name</th>
+            <th>URL</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if customers %}
             {% for customer in customers %}
             <tr>
                 <td>{{ customer[1] }}</td>
@@ -173,8 +49,33 @@
                 </td>
             </tr>
             {% endfor %}
-        </tbody>
-    </table>
-</main>
-</body>
-</html>
+        {% else %}
+          <p>No customers records created.</p>
+        {% endif %}
+    </tbody>
+</table>
+
+ <script>
+document.getElementById('customerForm').addEventListener('submit', function(event) {
+    const ddName = document.getElementById('dd_name').value.trim();
+    const cbrName = document.getElementById('cbr_name').value.trim();
+
+    if (!ddName && !cbrName) {
+        event.preventDefault(); // Prevent form submission
+        const errorMessage = document.getElementById('error-message');
+        errorMessage.style.display = 'block'; // Show error message
+    }
+});
+
+function copyToClipboard(relativeUrl, button) {
+    const fullUrl = `${window.location.origin}${relativeUrl}`;
+    navigator.clipboard.writeText(fullUrl).then(() => {
+        button.textContent = 'Copied!';
+        setTimeout(() => (button.textContent = 'Copy URL'), 2000);
+    }).catch(err => {
+        console.error('Failed to copy text: ', err);
+    });
+}
+</script>
+
+{% endblock %}

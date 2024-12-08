@@ -6,10 +6,11 @@ from flask import Flask, render_template, request, redirect, url_for, jsonify, s
 import secrets
 from services.buz_data import get_open_orders, get_schedule_jobs_details
 from authlib.integrations.flask_client import OAuth
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required, current_user
+from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from datetime import timedelta
+from services.update_status_mapping import get_status_mapping, get_status_mappings, edit_status_mapping, \
+    populate_status_mapping_table
 import logging
-from services.auth import login_manager, oauth, setup_auth_routes
 
 
 logging.basicConfig(level=logging.DEBUG)
@@ -22,8 +23,14 @@ app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET")
 
 # Initialize OAuth and LoginManager
+oauth = OAuth(app)
+login_manager = LoginManager()
 login_manager.init_app(app)
-oauth.init_app(app)
+login_manager.login_view = "login" # Set the default login view
+
+# Customize messages (optional)
+login_manager.login_message = "Please log in to access this page."
+login_manager.login_message_category = "error"
 
 
 # Handle unauthorized access by redirecting to login
@@ -31,6 +38,23 @@ oauth.init_app(app)
 def handle_unauthorized():
     app.logger.warning("Unauthorized access attempt.")
     return redirect(url_for("login"))
+
+
+google = oauth.register(
+    name="google",
+    client_id=os.getenv("GOOGLE_CLIENT_ID"),
+    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+    access_token_url="https://oauth2.googleapis.com/token",
+    authorize_url="https://accounts.google.com/o/oauth2/auth",
+    api_base_url="https://www.googleapis.com/oauth2/v1/",
+    userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
+    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+    client_kwargs={
+        "scope": "openid email profile",
+        "token_endpoint_auth_method": "client_secret_post",
+        "prompt": "consent"
+    }
+)
 
 
 # Mock User class for simplicity
@@ -47,6 +71,15 @@ users = {}  # A simple in-memory user store
 @login_manager.user_loader
 def load_user(user_id):
     return users.get(user_id)
+
+
+@app.route("/login")
+def login():
+    return google.authorize_redirect(url_for("callback", _external=True))
+
+
+# Load allowed users from environment
+ALLOWED_USERS = set(os.getenv("ALLOWED_USERS", "").split(","))
 
 
 @app.route("/callback")
@@ -87,21 +120,21 @@ DB_PATH = os.getenv("DATABASE_PATH", "customers.db")
 
 
 # Function to initialize the database
-def init_db():
+def create_customers_table():
     try:
-        if not os.path.exists(DB_PATH):
-            with sqlite3.connect(DB_PATH) as conn:
-                cur = conn.cursor()
-                cur.execute('''
-                    CREATE TABLE customers (
-                        id INTEGER PRIMARY KEY AUTOINCREMENT,
-                        dd_name TEXT,
-                        cbr_name TEXT,
-                        obfuscated_id TEXT NOT NULL UNIQUE
-                    )
-                ''')
-                conn.commit()
-                print("Database and table created successfully")
+        conn = sqlite3.connect(DB_PATH)
+        cur = conn.cursor()
+        cur.execute('''
+            CREATE TABLE IF NOT EXISTS customers (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                dd_name TEXT,
+                cbr_name TEXT,
+                obfuscated_id TEXT NOT NULL UNIQUE
+            )
+        ''')
+        conn.commit()
+        conn.close()
+        print("Database and table created successfully")
     except sqlite3.Error as e:
         print(f"Database initialization error: {e}")
 
@@ -128,6 +161,7 @@ def home():
 @app.route('/admin', methods=['GET', 'POST'])
 @login_required
 def admin():
+    create_customers_table()
     if request.method == 'POST':
         dd_name = request.form['dd_name']
         cbr_name = request.form['cbr_name']
@@ -156,8 +190,10 @@ def show_report(obfuscated_id):
 
     try:
         # Fetch data for both instances
-        data_dd = get_open_orders(customer[0], "DD")
-        data_cbr = get_open_orders(customer[1], "CBR")
+        conn = sqlite3.connect(DB_PATH)
+        data_dd = get_open_orders(conn, customer[0], "DD")
+        data_cbr = get_open_orders(conn, customer[1], "CBR")
+        conn.close()
 
         # Combine the results
         combined_data = data_cbr + data_dd
@@ -226,7 +262,7 @@ def list_status_mappings():
 
 # Error Handlers
 @app.route('/status_mapping/edit/<int:mapping_id>', methods=['GET', 'POST'])
-def edit_status_mapping(mapping_id):
+def edit_status_mapping_route(mapping_id):
     conn = sqlite3.connect(DB_PATH)
 
     if request.method == 'POST':
@@ -292,6 +328,4 @@ def error500():
 
 
 if __name__ == '__main__':
-    # Initialize the database when the app starts
-    init_db()
     app.run()

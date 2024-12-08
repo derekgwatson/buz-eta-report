@@ -3,37 +3,143 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Oops!{% endblock %}</title>
+    <title>{% block title %}Admin Dashboard{% endblock %}</title>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
         body {
-            font-family: "Comic Sans MS", cursive, sans-serif;
+            font-family: 'Roboto', Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f4f4f9;
+            color: #333;
+        }
+        header {
+            background-color: #4CAF50;
+            color: white;
+            padding: 15px 20px;
             text-align: center;
-            padding: 50px;
-            background-color: #f8f9fa;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
         }
-        h1 {
-            font-size: 4rem;
-            color: #ff6b6b;
+        header h1 {
+            margin: 0;
+            font-size: 2rem;
         }
-        p {
-            font-size: 1.5rem;
-            color: #6c757d;
-        }
-        a {
-            color: #007bff;
+        header a {
+            color: white;
             text-decoration: none;
+            font-size: 1rem;
+            background: #f44336;
+            padding: 10px 15px;
+            border-radius: 5px;
+            transition: background 0.3s;
+        }
+        header a:hover {
+            background: #d32f2f;
+        }
+        nav {
+            margin: 20px;
+            text-align: center;
+        }
+        nav a {
+            margin: 0 15px;
+            font-size: 1.2rem;
+            color: #4CAF50;
+            text-decoration: none;
+            font-weight: 500;
+        }
+        nav a:hover {
+            text-decoration: underline;
+        }
+        main {
+            padding: 20px;
+            max-width: 900px;
+            margin: 20px auto;
+            background-color: white;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
+        }
+        h2 {
+            color: #4CAF50;
+            margin-bottom: 15px;
+        }
+        form {
+            margin-bottom: 30px;
+        }
+        form label {
+            display: block;
+            margin-bottom: 5px;
             font-weight: bold;
         }
-        img {
-            max-width: 300px;
-            margin: 20px auto;
+        form input, form button {
+            width: 100%;
+            padding: 10px;
+            margin-bottom: 15px;
+            border: 1px solid #ccc;
+            border-radius: 4px;
+        }
+        form button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: 500;
+        }
+        form button:hover {
+            background-color: #45a049;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+            text-align: left;
+        }
+        table, th, td {
+            border: 1px solid #ddd;
+        }
+        th, td {
+            padding: 10px;
+        }
+        th {
+            background-color: #f4f4f9;
+            font-weight: 500;
+        }
+        td {
+            text-align: left;
+            vertical-align: middle;
+        }
+        tr:hover {
+            background-color: #f1f1f1;
+        }
+        .actions a {
+            text-decoration: none;
+            color: #4CAF50;
+            font-weight: bold;
+        }
+        .actions a:hover {
+            text-decoration: underline;
         }
     </style>
 </head>
 <body>
-    <main>
-        {% block content %}
-        {% endblock %}
-    </main>
+<header>
+    <h1>Admin Dashboard</h1>
+    {% if current_user.is_authenticated %}
+        <a href="{{ url_for('logout') }}">Logout</a>
+    {% else %}
+        <a href="{{ url_for('login') }}">Login</a>
+    {% endif %}
+</header>
+
+<nav>
+    <a href="{{ url_for('admin') }}">Admin Page</a>
+    <a href="{{ url_for('list_status_mappings') }}">Status Mapping</a>
+</nav>
+
+<main>
+    {% block content %}
+    {% endblock %}
+</main>
 </body>
 </html>

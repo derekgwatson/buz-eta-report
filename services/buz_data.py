@@ -1,9 +1,29 @@
 import requests
-import pandas as pd
 from services.odata_client import ODataClient
+import pandas as pd
 
 
-def get_open_orders(customer, instance):
+def get_statuses(instance):
+    # Base URL for SalesReport
+    odata_client = ODataClient(instance)
+
+    # Define instance-specific filters
+    filter_conditions = [
+            "OrderStatus eq 'Work in Progress'",
+            "ProductionStatus ne 'null'",
+            "ProductionStatus ne 'Invoiced'",
+            "ProductionStatus ne 'Cancelled'",
+        ]
+
+    # Fetch filtered SalesReport data
+    report_data = odata_client.get("JobsScheduleDetailed", filter_conditions)
+
+    statuses = {item["ProductionStatus"] for item in report_data if "ProductionStatus" in item}
+    print(f"Statuses are: {statuses}")
+    return statuses
+
+
+def get_open_orders(conn, customer, instance):
     # Base URL for SalesReport
     odata_client = ODataClient(instance)
 
@@ -24,9 +44,23 @@ def get_open_orders(customer, instance):
     if _sales_report.empty:
         return []
 
+    # Fetch status mappings from the database
+    cursor = conn.cursor()
+    cursor.execute('''
+    SELECT odata_status, custom_status 
+    FROM status_mapping 
+    WHERE active = TRUE
+    ''')
+    status_mappings = dict(cursor.fetchall())
+
+    # Map ProductionStatus using the status mappings
+    _sales_report['ProductionStatus'] = _sales_report['ProductionStatus'].map(
+        lambda x: status_mappings.get(x, x)
+    )
+
     # Remove duplicate rows based on the displayed columns
-    displayed_columns = ["RefNo", "Descn", "DateScheduled", "ProductionLine", "InventoryItem",
-                         "ProductionStatus", "FixedLine"]
+    displayed_columns = ["RefNo", "Descn", "DateScheduled", "ProductionLine",
+                         "InventoryItem", "ProductionStatus", "FixedLine"]
     _sales_report = _sales_report.drop_duplicates(subset=displayed_columns)
 
     # Sort by RefNo and FixedLine

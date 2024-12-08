@@ -16,3 +16,6 @@ __pycache__/
 # Deployment Scripts (if applicable)
 deploy.sh
 run.bat
+
+# db
+customers.db
