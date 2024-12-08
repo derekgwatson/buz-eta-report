@@ -85,15 +85,17 @@
         }
 
         table {
-            width: 100%; /* Make the table take full width */
+            width: 100%;
             border-collapse: collapse;
             margin-bottom: 20px;
+            table-layout: fixed; /* Ensures consistent column widths */
         }
 
         th, td {
             border: 1px solid #ddd;
             padding: 8px;
             text-align: left;
+            word-wrap: break-word; /* Prevents content from overflowing */
         }
 
         th {
@@ -101,8 +103,17 @@
             color: #2c3e50;
         }
 
-        tr:nth-child(even) {
-            background-color: #f7f9fc;
+        /* Optionally, you can set a specific width for each column if needed */
+        th:nth-child(1), td:nth-child(1) {
+            width: 30%; /* Adjust this percentage as needed */
+        }
+
+        th:nth-child(2), td:nth-child(2) {
+            width: 40%; /* Adjust this percentage as needed */
+        }
+
+        th:nth-child(3), td:nth-child(3) {
+            width: 30%; /* Adjust this percentage as needed */
         }
 
         tr:hover {
