@@ -119,11 +119,17 @@
         tr:hover {
             background-color: #eaf2f5;
         }
+
+        .no-data {
+            text-align: center;
+            font-size: 1.2em;
+            color: #e74c3c;
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Open Orders for {{ data[0].Customer }}</h1>
+        <h1>Open Orders for {{ customer_name }}</h1>
         <img src="{{ url_for('static', filename='watson_logo.png') }}" alt="Watson Logo" class="logo">
     </div>
 
@@ -133,35 +139,39 @@
     <div class="container" id="container">
         <!-- Main Content -->
         <div class="content" id="content">
-            {% for RefNo, items in data|groupby("RefNo") %}
-            <!-- Order Header -->
-            <div class="order-header">
-                <strong>Supplier:</strong> {{ items[0].Instance or 'N/A' }} |
-                <strong>Expected:</strong> {{ items[0].DateScheduled or 'N/A' }} |
-                <strong>Order #:</strong> {{ RefNo or 'N/A' }} |
-                <strong>Ref:</strong> {{ items[0].Descn or 'N/A' }}
-            </div>
+            {% if data and data|length > 0 %}
+                {% for RefNo, items in data|groupby("RefNo") %}
+                    <!-- Order Header -->
+                    <div class="order-header">
+                        <strong>Supplier:</strong> {{ items[0].Instance or 'N/A' }} |
+                        <strong>Expected:</strong> {{ items[0].DateScheduled or 'N/A' }} |
+                        <strong>Order #:</strong> {{ RefNo or 'N/A' }} |
+                        <strong>Ref:</strong> {{ items[0].Descn or 'N/A' }}
+                    </div>
 
-            <!-- Items Table -->
-            <table>
-                <thead>
-                    <tr>
-                        <th>Group</th>
-                        <th>Item</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in items %}
-                    <tr>
-                        <td>{{ item.ProductionLine or 'N/A' }}</td>
-                        <td>{{ item.InventoryItem or 'N/A' }} ({{ item.FixedLine or 'N/A' }})</td>
-                        <td>{{ item.ProductionStatus or 'N/A' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endfor %}
+                    <!-- Items Table -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Group</th>
+                                <th>Item</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                                <tr>
+                                    <td>{{ item.ProductionLine or 'N/A' }}</td>
+                                    <td>{{ item.InventoryItem or 'N/A' }} ({{ item.FixedLine or 'N/A' }})</td>
+                                    <td>{{ item.ProductionStatus or 'N/A' }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% endfor %}
+            {% else %}
+                <p class="no-data">No data available to display - we may have your name wrong!</p>
+            {% endif %}
         </div>
 
         <!-- Sidebar -->
