@@ -85,15 +85,17 @@
         }
 
         table {
-            width: 100%; /* Make the table take full width */
+            width: 100%;
             border-collapse: collapse;
             margin-bottom: 20px;
+            table-layout: fixed; /* Ensures consistent column widths */
         }
 
         th, td {
             border: 1px solid #ddd;
             padding: 8px;
             text-align: left;
+            word-wrap: break-word; /* Prevents content from overflowing */
         }
 
         th {
@@ -101,18 +103,33 @@
             color: #2c3e50;
         }
 
-        tr:nth-child(even) {
-            background-color: #f7f9fc;
+        /* Optionally, you can set a specific width for each column if needed */
+        th:nth-child(1), td:nth-child(1) {
+            width: 30%; /* Adjust this percentage as needed */
+        }
+
+        th:nth-child(2), td:nth-child(2) {
+            width: 40%; /* Adjust this percentage as needed */
+        }
+
+        th:nth-child(3), td:nth-child(3) {
+            width: 30%; /* Adjust this percentage as needed */
         }
 
         tr:hover {
             background-color: #eaf2f5;
         }
+
+        .no-data {
+            text-align: center;
+            font-size: 1.2em;
+            color: #e74c3c;
+        }
     </style>
 </head>
 <body>
     <div class="header">
-        <h1>Open Orders for {{ data[0].Customer }}</h1>
+        <h1>Open Orders for {{ customer_name }}</h1>
         <img src="{{ url_for('static', filename='watson_logo.png') }}" alt="Watson Logo" class="logo">
     </div>
 
@@ -122,35 +139,40 @@
     <div class="container" id="container">
         <!-- Main Content -->
         <div class="content" id="content">
-            {% for RefNo, items in data|groupby("RefNo") %}
-            <!-- Order Header -->
-            <div class="order-header">
-                <strong>Supplier:</strong> {{ items[0].Instance or 'N/A' }} |
-                <strong>Expected:</strong> {{ items[0].DateScheduled or 'N/A' }} |
-                <strong>Order #:</strong> {{ RefNo or 'N/A' }} |
-                <strong>Ref:</strong> {{ items[0].Descn or 'N/A' }}
-            </div>
+            {% if data and data|length > 0 %}
+                {% for RefNo, items in data|groupby("RefNo") %}
+                    <!-- Order Header -->
+                    <div class="order-header">
+                        <strong>Supplier:</strong> {{ items[0].Instance or 'N/A' }} |
+                        <strong>Expected:</strong> {{ items[0].DateScheduled or 'N/A' }} |
+                        <strong>Order #:</strong> {{ RefNo or 'N/A' }} |
+                        <strong>Ref:</strong> {{ items[0].Descn or 'N/A' }}
+                    </div>
 
-            <!-- Items Table -->
-            <table>
-                <thead>
-                    <tr>
-                        <th>Group</th>
-                        <th>Item</th>
-                        <th>Status</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for item in items %}
-                    <tr>
-                        <td>{{ item.ProductionLine or 'N/A' }}</td>
-                        <td>{{ item.InventoryItem or 'N/A' }} ({{ item.FixedLine or 'N/A' }})</td>
-                        <td>{{ item.ProductionStatus or 'N/A' }}</td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
-            {% endfor %}
+                    <!-- Items Table -->
+                    <table>
+                        <thead>
+                            <tr>
+                                <th>Group</th>
+                                <th>Item</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for item in items %}
+                                <tr>
+                                    <td>{{ item.ProductionLine or 'N/A' }}</td>
+                                    <td>{{ item.InventoryItem or 'N/A' }} ({{ item.FixedLine or 'N/A' }})</td>
+                                    <td>{{ item.ProductionStatus or 'N/A' }}</td>
+                                </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                {% endfor %}
+            {% else %}
+                <p class="no-data">No data available to display. If you believe this is incorrect, please contact us to
+                    confirm that we have the correct supplier name on file.</p>
+            {% endif %}
         </div>
 
         <!-- Sidebar -->

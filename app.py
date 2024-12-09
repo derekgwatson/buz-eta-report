@@ -165,7 +165,9 @@ def admin():
     if request.method == 'POST':
         dd_name = request.form['dd_name']
         cbr_name = request.form['cbr_name']
-        obfuscated_id = secrets.token_urlsafe(8)
+        obfuscated_id = secrets.token_urlsafe(30)
+        print(f"Generated Token: {obfuscated_id}")
+        print(f"Length of Token: {len(obfuscated_id)}")
 
         # Insert customer into the database
         query_db(
@@ -188,19 +190,33 @@ def show_report(obfuscated_id):
         error_message = f"No report found for ID: {obfuscated_id}"
         return render_template('404.html', message=error_message), 404
 
-    try:
-        # Fetch data for both instances
-        conn = sqlite3.connect(DB_PATH)
-        data_dd = get_open_orders(conn, customer[0], "DD")
-        data_cbr = get_open_orders(conn, customer[1], "CBR")
-        conn.close()
+#    try:
+    # Fetch data for both instances
+    conn = sqlite3.connect(DB_PATH)
+    data_dd = get_open_orders(conn, customer[0], "DD")
+    data_cbr = get_open_orders(conn, customer[1], "CBR")
+    conn.close()
 
-        # Combine the results
-        combined_data = data_cbr + data_dd
-        return render_template('report.html', data=combined_data)
-    except Exception as e:
-        error_message = f"Failed to generate report for ID: {obfuscated_id}. Error: {str(e)}"
-        return render_template('500.html', message=error_message), 500
+    # Combine the results
+    combined_data = data_cbr + data_dd
+
+    # Prepare customer name: handle the cases based on the conditions
+    if customer[0] == customer[1] or customer[1] == '':
+        customer_name = customer[0]  # Use customer[0] if they are the same or if customer[1] is empty
+    elif customer[0] == '':
+        customer_name = customer[1]  # Use customer[1] if customer[0] is empty
+    else:
+        customer_name = f"{customer[0]} / {customer[1]}"  # Use both names if they are different
+
+    # Pass the customer name along with the data to the template
+    if combined_data:
+        return render_template('report.html', data=combined_data, customer_name=customer_name)
+
+    return render_template('report.html', customer_name=customer_name)
+
+#    except Exception as e:
+#        error_message = f"Failed to generate report for ID: {obfuscated_id}. Error: {str(e)}"
+#        return render_template('500.html', message=error_message), 500
 
 
 @app.route('/delete/<int:customer_id>')
