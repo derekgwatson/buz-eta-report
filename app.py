@@ -12,7 +12,6 @@ from services.update_status_mapping import get_status_mapping, get_status_mappin
     populate_status_mapping_table
 import logging
 
-
 logging.basicConfig(level=logging.DEBUG)
 permanent_session_lifetime = timedelta(minutes=30)
 
@@ -88,6 +87,11 @@ def callback():
     print("Token:", token)  # Debugging
     user_info = google.get("userinfo").json()
     print("User Info:", user_info)  # Debugging
+
+    # Check if token has expired or is invalid
+    if not token or token.get('expires_in', 0) <= 0:
+        print("Token expired or missing, redirecting to login.")
+        return redirect(url_for("login"))
 
     # Use email as the unique user identifier
     user_email = user_info.get("email")
