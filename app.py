@@ -165,7 +165,9 @@ def admin():
     if request.method == 'POST':
         dd_name = request.form['dd_name']
         cbr_name = request.form['cbr_name']
-        obfuscated_id = secrets.token_urlsafe(8)
+        obfuscated_id = secrets.token_urlsafe(30)
+        print(f"Generated Token: {obfuscated_id}")
+        print(f"Length of Token: {len(obfuscated_id)}")
 
         # Insert customer into the database
         query_db(
