@@ -44,16 +44,19 @@ def get_open_orders(conn, customer, instance):
     if _sales_report.empty:
         return []
 
-    # Fetch status mappings from the database
+    # Fetch active status mappings from the database
     cursor = conn.cursor()
-    cursor.execute('''
-    SELECT odata_status, custom_status 
+    cursor.execute(''' 
+    SELECT odata_status, custom_status
     FROM status_mapping 
     WHERE active = TRUE
     ''')
-    status_mappings = dict(cursor.fetchall())
+    status_mappings = dict(cursor.fetchall())  # odata_status as keys, custom_status as values
 
-    # Map ProductionStatus using the status mappings
+    # Remove rows where the ProductionStatus is not in the active status mappings (odata_status keys)
+    _sales_report = _sales_report[_sales_report['ProductionStatus'].isin(status_mappings.keys())]
+
+    # Map ProductionStatus using the status mappings (odata_status to custom_status)
     _sales_report['ProductionStatus'] = _sales_report['ProductionStatus'].map(
         lambda x: status_mappings.get(x, x)
     )
@@ -68,6 +71,7 @@ def get_open_orders(conn, customer, instance):
 
     # Convert the DataFrame to a list of dictionaries
     return _sales_report.to_dict(orient="records")
+
 
 
 def get_schedule_jobs_details(order_no, endpoint, instance):

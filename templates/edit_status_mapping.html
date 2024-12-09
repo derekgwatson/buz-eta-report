@@ -11,7 +11,7 @@
     <input type="text" name="odata_status" value="{{ mapping[1] }}" readonly><br>
 
     <label for="custom_status">Custom Status:</label>
-    <input type="text" name="custom_status" value="{{ mapping[2] }}"><br>
+    <input type="text" name="custom_status" value="{{ mapping[2] }}" required><br>
 
     <label for="active">Active:</label>
     <input type="checkbox" name="active" {{ 'checked' if mapping[3] else '' }}><br>
