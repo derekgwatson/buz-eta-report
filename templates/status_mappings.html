@@ -6,7 +6,7 @@
 <h1>Status Mappings</h1>
 <table>
     <tr>
-        <th>OData Status</th>
+        <th>Buz Status</th>
         <th>Custom Status</th>
         <th>Active</th>
         <th>Actions</th>
@@ -26,7 +26,6 @@
 <HR>
 <!-- Buttons Section -->
 
-{% if current_user.role == 'admin' %}
 <div class="button-container">
     <form id="refreshForm" action="{{ url_for('refresh_statuses') }}" method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -37,7 +36,6 @@
         <span>Refreshing... Please wait.</span>
     </div>
 </div>
-{% endif %}
 
 <!-- JavaScript for Cursor Change -->
 <script>
