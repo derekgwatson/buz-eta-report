@@ -1,70 +1,29 @@
-<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Edit Customer</title>
-    <style>
-        body {
-            font-family: Arial, sans-serif;
-            background-color: #f4f4f9;
-            margin: 0;
-            padding: 20px;
-        }
-        form {
-            max-width: 600px;
-            margin: 0 auto;
-            background: white;
-            padding: 20px;
-            border-radius: 8px;
-            box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
-        }
-        form label {
-            display: block;
-            margin-bottom: 8px;
-            font-weight: bold;
-        }
-        form input, form button {
-            width: 100%;
-            padding: 10px;
-            margin-bottom: 15px;
-            border: 1px solid #ccc;
-            border-radius: 4px;
-        }
-        form button {
-            background-color: #4CAF50;
-            color: white;
-            border: none;
-            cursor: pointer;
-        }
-        form button:hover {
-            background-color: #45a049;
-        }
-    </style>
-</head>
-<body>
-    <form method="post" id="customerForm">
-        <h2>Edit Customer</h2>
-        <label for="dd_name">DD Name:</label>
-        <input type="text" id="dd_name" name="dd_name" value="{{ customer[1] }}">
+{% extends "layout.html" %}
 
-        <label for="cbr_name">Cbr Name:</label>
-        <input type="text" id="cbr_name" name="cbr_name" value="{{ customer[2] }}">
+{% block title %}Admin Page{% endblock %}
 
-        <button type="submit">Save Changes</button>
-    </form>
+{% block content %}
+<form method="post" id="customerForm">
+    <h2>Edit Customer</h2>
+    <label for="dd_name">DD Name:</label>
+    <input type="text" id="dd_name" name="dd_name" value="{{ customer[1] }}">
+
+    <label for="cbr_name">Cbr Name:</label>
+    <input type="text" id="cbr_name" name="cbr_name" value="{{ customer[2] }}">
+
+    <button type="submit">Save Changes</button>
+</form>
 
 <script>
-        document.getElementById('customerForm').addEventListener('submit', function(event) {
-            const ddName = document.getElementById('dd_name').value.trim();
-            const cbrName = document.getElementById('cbr_name').value.trim();
+document.getElementById('customerForm').addEventListener('submit', function(event) {
+    const ddName = document.getElementById('dd_name').value.trim();
+    const cbrName = document.getElementById('cbr_name').value.trim();
 
-            if (!ddName && !cbrName) {
-                event.preventDefault(); // Prevent form submission
-                const errorMessage = document.getElementById('error-message');
-                errorMessage.style.display = 'block'; // Show error message
-            }
-        });
-    </script>
-</body>
-</html>
+    if (!ddName && !cbrName) {
+        event.preventDefault(); // Prevent form submission
+        const errorMessage = document.getElementById('error-message');
+        errorMessage.style.display = 'block'; // Show error message
+    }
+});
+</script>
+{% endblock %}

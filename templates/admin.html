@@ -19,12 +19,12 @@
 </form>
 
 <h2>Existing Customers</h2>
-<table>
+<button id="copy-all">Copy All to Clipboard</button>
+<table id="customers-table">
     <thead>
         <tr>
-            <th>DD Name</th>
-            <th>Cbr Name</th>
-            <th>URL</th>
+            <th>Name</th>
+            <th>Full URL</th>
             <th>Actions</th>
         </tr>
     </thead>
@@ -32,50 +32,56 @@
         {% if customers %}
             {% for customer in customers %}
             <tr>
-                <td>{{ customer[1] }}</td>
-                <td>{{ customer[2] }}</td>
                 <td>
-                    <a href="{{ url_for('show_report', obfuscated_id=customer[3]) }}" id="url-{{ loop.index }}">
-                        {{ url_for('show_report', obfuscated_id=customer[3]) }}
+                    {{ customer[1] or customer[2] }}
+                </td>
+                <td>
+                    <a href="{{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) }}" id="url-{{ loop.index }}">
+                        {{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) }}
                     </a>
-                    <button onclick="copyToClipboard('{{ url_for('show_report', obfuscated_id=customer[3]) }}', this)">Copy URL</button>
                 </td>
                 <td class="actions">
                     <a href="{{ url_for('edit_customer', customer_id=customer[0]) }}">Edit</a> |
                     <a href="{{ url_for('delete_customer', customer_id=customer[0]) }}"
-                       onclick="return confirm('Are you sure you want to delete {{ customer[1] }}?');">
+                       onclick="return confirm('Are you sure you want to delete {{ customer[1] or customer[2] }}?');">
                        Delete
                     </a>
                 </td>
             </tr>
             {% endfor %}
         {% else %}
-          <p>No customers records created.</p>
+          <p>No customer records created.</p>
         {% endif %}
     </tbody>
 </table>
 
- <script>
+<script>
 document.getElementById('customerForm').addEventListener('submit', function(event) {
     const ddName = document.getElementById('dd_name').value.trim();
     const cbrName = document.getElementById('cbr_name').value.trim();
 
     if (!ddName && !cbrName) {
-        event.preventDefault(); // Prevent form submission
-        const errorMessage = document.getElementById('error-message');
-        errorMessage.style.display = 'block'; // Show error message
+        event.preventDefault();
+        document.getElementById('error-message').style.display = 'block';
     }
 });
 
-function copyToClipboard(relativeUrl, button) {
-    const fullUrl = `${window.location.origin}${relativeUrl}`;
-    navigator.clipboard.writeText(fullUrl).then(() => {
-        button.textContent = 'Copied!';
-        setTimeout(() => (button.textContent = 'Copy URL'), 2000);
+document.getElementById('copy-all').addEventListener('click', function() {
+    const table = document.getElementById('customers-table');
+    let rows = Array.from(table.rows).slice(1);
+
+    let text = rows.map(row => {
+        return Array.from(row.cells).slice(0, 2) // Exclude the Actions column
+            .map(cell => cell.innerText.trim())
+            .join('\t');
+    }).join('\n');
+
+    navigator.clipboard.writeText(text).then(() => {
+        alert('Customer data copied to clipboard!');
     }).catch(err => {
         console.error('Failed to copy text: ', err);
     });
-}
+});
 </script>
 
 {% endblock %}
