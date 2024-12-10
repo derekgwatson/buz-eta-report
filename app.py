@@ -12,14 +12,18 @@ from services.update_status_mapping import get_status_mapping, get_status_mappin
     populate_status_mapping_table
 import logging
 
-logging.basicConfig(level=logging.DEBUG)
-permanent_session_lifetime = timedelta(minutes=30)
-
 # Load environment variables from .env
 load_dotenv()
 
+# Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET")
+
+# Set app configurations
+app.permanent_session_lifetime = timedelta(minutes=30)
+
+# Set up logging
+logging.basicConfig(level=logging.DEBUG)
 
 # Initialize OAuth and LoginManager
 oauth = OAuth(app)
