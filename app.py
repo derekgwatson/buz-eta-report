@@ -182,8 +182,13 @@ def admin():
 
     # Retrieve all customers from the database
     customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id FROM customers")
+    # Sort using the combined name logic
+    sorted_customers = sorted(
+        customers,
+        key=lambda c: (c[1] or c[2] or "").lower()
+    )
     if customers:
-        return render_template('admin.html', customers=customers)
+        return render_template('admin.html', customers=sorted_customers)
     return render_template('admin.html')
 
 

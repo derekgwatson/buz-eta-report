@@ -29,31 +29,25 @@
         </tr>
     </thead>
     <tbody>
-        {% if customers %}
-            {% for customer in customers %}
-            <tr>
-                <td>
-                    {{ customer[1] or customer[2] }}
-                </td>
-                <td>
-                    <a href="{{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) }}" id="url-{{ loop.index }}">
-                        {{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) }}
-                    </a>
-                </td>
-                <td class="actions">
-                    <a href="{{ url_for('edit_customer', customer_id=customer[0]) }}">Edit</a> |
-                    <a href="{{ url_for('delete_customer', customer_id=customer[0]) }}"
-                       onclick="return confirm('Are you sure you want to delete {{ customer[1] or customer[2] }}?');">
-                       Delete
-                    </a>
-                </td>
-            </tr>
-            {% endfor %}
-        {% else %}
-          <p>No customer records created.</p>
-        {% endif %}
+        {% for customer in customers %}
+        <tr>
+            <td>{{ customer[1] or customer[2] }}</td>
+            <td class="url-column" data-full-url="{{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) }}">
+                <a href="{{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) }}" id="url-{{ loop.index }}">
+                    {{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) | truncate(30, True) }}
+                </a>
+            </td>
+            <td class="actions">
+                <a href="{{ url_for('edit_customer', customer_id=customer[0]) }}" class="btn-edit">Edit</a>
+                <a href="{{ url_for('delete_customer', customer_id=customer[0]) }}"
+                   onclick="return confirm('Are you sure you want to delete {{ customer[1] or customer[2] }}?');"
+                   class="btn-delete">Delete</a>
+            </td>
+        </tr>
+        {% endfor %}
     </tbody>
 </table>
+
 
 <script>
 document.getElementById('customerForm').addEventListener('submit', function(event) {
@@ -67,13 +61,12 @@ document.getElementById('customerForm').addEventListener('submit', function(even
 });
 
 document.getElementById('copy-all').addEventListener('click', function() {
-    const table = document.getElementById('customers-table');
-    let rows = Array.from(table.rows).slice(1);
+    const rows = Array.from(document.querySelectorAll('#customers-table tbody tr'));
 
-    let text = rows.map(row => {
-        return Array.from(row.cells).slice(0, 2) // Exclude the Actions column
-            .map(cell => cell.innerText.trim())
-            .join('\t');
+    const text = rows.map(row => {
+        const name = row.cells[0].innerText.trim();
+        const url = row.querySelector('.url-column').dataset.fullUrl.trim();
+        return `${name}\t${url}`;
     }).join('\n');
 
     navigator.clipboard.writeText(text).then(() => {
@@ -82,6 +75,6 @@ document.getElementById('copy-all').addEventListener('click', function() {
         console.error('Failed to copy text: ', err);
     });
 });
-</script>
 
+</script>
 {% endblock %}

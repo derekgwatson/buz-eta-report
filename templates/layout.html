@@ -6,6 +6,7 @@
     <title>{% block title %}Admin Dashboard{% endblock %}</title>
     <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
     <style>
+        /* General Styles */
         body {
             font-family: 'Roboto', Arial, sans-serif;
             margin: 0;
@@ -13,6 +14,7 @@
             background-color: #f4f4f9;
             color: #333;
         }
+
         header {
             background-color: #4CAF50;
             color: white;
@@ -22,10 +24,12 @@
             justify-content: space-between;
             align-items: center;
         }
+
         header h1 {
             margin: 0;
             font-size: 2rem;
         }
+
         header a {
             color: white;
             text-decoration: none;
@@ -35,13 +39,16 @@
             border-radius: 5px;
             transition: background 0.3s;
         }
+
         header a:hover {
             background: #d32f2f;
         }
+
         nav {
             margin: 20px;
             text-align: center;
         }
+
         nav a {
             margin: 0 15px;
             font-size: 1.2rem;
@@ -49,9 +56,11 @@
             text-decoration: none;
             font-weight: 500;
         }
+
         nav a:hover {
             text-decoration: underline;
         }
+
         main {
             padding: 20px;
             max-width: 900px;
@@ -60,18 +69,22 @@
             border-radius: 8px;
             box-shadow: 0 2px 5px rgba(0, 0, 0, 0.1);
         }
+
         h2 {
             color: #4CAF50;
             margin-bottom: 15px;
         }
+
         form {
             margin-bottom: 30px;
         }
+
         form label {
             display: block;
             margin-bottom: 5px;
             font-weight: bold;
         }
+
         form input, form button {
             width: 100%;
             padding: 10px;
@@ -79,6 +92,7 @@
             border: 1px solid #ccc;
             border-radius: 4px;
         }
+
         form button {
             background-color: #4CAF50;
             color: white;
@@ -86,38 +100,79 @@
             cursor: pointer;
             font-weight: 500;
         }
+
         form button:hover {
             background-color: #45a049;
         }
+
+        /* Table Styles */
         table {
             width: 100%;
             border-collapse: collapse;
             margin-top: 20px;
             text-align: left;
         }
+
         table, th, td {
             border: 1px solid #ddd;
         }
+
         th, td {
             padding: 10px;
         }
+
         th {
             background-color: #f4f4f9;
             font-weight: 500;
         }
+
         td {
             text-align: left;
             vertical-align: middle;
         }
+
         tr:hover {
             background-color: #f1f1f1;
         }
+
+        /* Updated Actions Styling */
         .actions a {
             text-decoration: none;
-            color: #4CAF50;
+            color: white;
             font-weight: bold;
+            padding: 5px 10px;
+            border-radius: 4px;
+            margin-right: 5px;
         }
-        .actions a:hover {
+
+        .btn-edit {
+            background-color: #007bff;
+        }
+
+        .btn-edit:hover {
+            background-color: #0056b3;
+        }
+
+        .btn-delete {
+            background-color: #dc3545;
+        }
+
+        .btn-delete:hover {
+            background-color: #b71c1c;
+        }
+
+        /* Truncated URL Display */
+        .url-column a {
+            display: inline-block;
+            max-width: 300px;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            color: #4CAF50;
+            text-decoration: none;
+        }
+
+        .url-column a:hover {
             text-decoration: underline;
         }
     </style>
