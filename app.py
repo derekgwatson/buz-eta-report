@@ -445,7 +445,9 @@ def edit_user(user_id):
     # Pre-fill form for editing
     user = query_db("SELECT id, email, name, role FROM users WHERE id = ?", (user_id,), one=True)
 
-    if not user:
+    if user:
+        user = dict(user)
+    else:
         flash("User not found.", "danger")
         return redirect(url_for('manage_users'))
 
