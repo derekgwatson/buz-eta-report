@@ -1,3 +1,12 @@
+import os
+import sqlite3
+from flask import g
+
+
+# Database file path
+DB_PATH = os.getenv("DATABASE_PATH", "customers.db")
+
+
 def update_status_mapping(conn, odata_statuses):
     cursor = conn.cursor()
 
@@ -53,3 +62,33 @@ def create_db_tables(conn):
     ''')
     print("Database tables created successfully")
     conn.commit()
+
+
+# Initialize the database connection using Flask's `g`
+def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect(DB_PATH)
+        g.db.row_factory = sqlite3.Row  # Enables column-based access
+    return g.db
+
+
+def query_db(query, args=(), one=False, logger=None):
+    try:
+        cur = get_db().cursor()
+        cur.execute(query, args)
+        rv = cur.fetchall()
+        get_db().commit()
+        return (rv[0] if rv else None) if one else rv
+    except sqlite3.Error as e:
+        if logger:
+            logger.error(f"Database error: {e}")
+        return None
+
+
+def execute_query(query, args=()):
+    try:
+        cur = get_db().cursor()
+        cur.execute(query, args)
+        get_db().commit()
+    except sqlite3.IntegrityError as e:
+        raise ValueError("Integrity error") from e

@@ -1,5 +1,5 @@
 import os
-import sqlite3
+from services.database import get_db, query_db, execute_query
 from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, g
@@ -79,14 +79,6 @@ login_manager.login_view = "login" # Set the default login view
 # Customize messages (optional)
 login_manager.login_message = "Please log in to access this page."
 login_manager.login_message_category = "error"
-
-
-# Initialize the database connection using Flask's `g`
-def get_db():
-    if 'db' not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row  # Enables column-based access
-    return g.db
 
 
 # Close the database connection when the app context is destroyed
@@ -170,7 +162,7 @@ def callback():
     # Query database for user
     user_data = query_db(
         "SELECT id, email, name, role, active FROM users WHERE email = ?",
-        (user_email,), one=True
+        (user_email,), one=True, logger=app.logger
     )
 
     if not user_data or not user_data[4]:  # Check if user exists and is active
@@ -191,23 +183,7 @@ def logout():
     return render_template('home.html')
 
 
-# Database file path
-DB_PATH = os.getenv("DATABASE_PATH", "customers.db")
-
-
 # Helper function to interact with the database
-def query_db(query, args=(), one=False):
-    try:
-        cur = get_db().cursor()
-        cur.execute(query, args)
-        rv = cur.fetchall()
-        get_db().commit()
-        return (rv[0] if rv else None) if one else rv
-    except sqlite3.Error as e:
-        app.logger.error(f"Database error: {e}")
-        return None
-
-
 @app.route('/')
 def home():
     return render_template('home.html')
@@ -227,7 +203,7 @@ def admin():
         # Insert customer into the database
         query_db(
             "INSERT INTO customers (dd_name, cbr_name, obfuscated_id) VALUES (?, ?, ?)",
-            (dd_name, cbr_name, obfuscated_id),
+            (dd_name, cbr_name, obfuscated_id), logger=app.logger
         )
         return redirect(url_for('admin'))
 
@@ -414,12 +390,12 @@ def add_user():
     role = request.form['role']
 
     try:
-        query_db(
+        execute_query(
             "INSERT INTO users (email, name, role) VALUES (?, ?, ?)",
             (email, name, role)
         )
         flash("User added successfully.", "success")
-    except sqlite3.IntegrityError:
+    except ValueError:
         flash("Email already exists.", "danger")
 
     return redirect(url_for('manage_users'))

@@ -1,11 +1,14 @@
 import unittest
 from unittest.mock import patch, MagicMock
-import pandas as pd
 import requests
-
-from services.odata_client import ODataClient
 from services.buz_data import get_open_orders, get_schedule_jobs_details
+from services.buz_data import query_db
 
+
+def test_query_db(app):
+    with app.app_context():
+        result = query_db("SELECT 1")
+        assert result is not None
 
 class TestOpenOrders(unittest.TestCase):
 
