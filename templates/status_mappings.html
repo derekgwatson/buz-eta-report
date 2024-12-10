@@ -25,8 +25,11 @@
 
 <HR>
 <!-- Buttons Section -->
+
+{% if current_user.role == 'admin' %}
 <div class="button-container">
     <form id="refreshForm" action="{{ url_for('refresh_statuses') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-refresh">Force Refresh from Buz</button>
     </form>
 
@@ -34,6 +37,7 @@
         <span>Refreshing... Please wait.</span>
     </div>
 </div>
+{% endif %}
 
 <!-- JavaScript for Cursor Change -->
 <script>

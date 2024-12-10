@@ -1,13 +1,28 @@
+# Core Flask and Extensions
 Flask>=2.0.0
-Jinja2==3.1.3
-Werkzeug==3.0.1
-itsdangerous==2.1.2
-MarkupSafe==2.1.5
-requests==2.32.3
-pandas==2.2.2
-python-dotenv>=1.0.0
-urllib3==1.26.13
-python-dateutil==2.9.0.post0
-gunicorn
-Authlib>=1.0.0
+Flask-WTF>=1.0.0
 Flask-Login>=0.6.2
+
+# Template and Web Handling
+Jinja2>=3.1.3
+Werkzeug>=3.0.1
+itsdangerous>=2.1.2
+MarkupSafe>=2.1.5
+
+# OAuth and Authentication
+Authlib>=1.0.0
+
+# Environment Management
+python-dotenv>=1.0.0
+
+# API and Data Management
+requests>=2.32.3
+pandas>=2.2.2
+urllib3>=1.26.13
+python-dateutil>=2.9.0.post0
+
+# Error Tracking
+sentry-sdk[flask]
+
+# Production Server
+gunicorn>=20.1.0

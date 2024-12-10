@@ -1,8 +1,9 @@
 import os
 import sqlite3
-
+from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, jsonify, session, flash
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, g
+from flask_login import current_user
 import secrets
 from services.buz_data import get_open_orders, get_schedule_jobs_details
 from authlib.integrations.flask_client import OAuth
@@ -10,10 +11,26 @@ from flask_login import LoginManager, UserMixin, login_user, logout_user, login_
 from datetime import timedelta
 from services.update_status_mapping import get_status_mapping, get_status_mappings, edit_status_mapping, \
     populate_status_mapping_table
-import logging
+import logging.config
+from functools import wraps
+from flask import abort
+from flask_wtf.csrf import CSRFProtect
+import sentry_sdk
+from sentry_sdk.integrations.flask import FlaskIntegration
+from services.database import create_db_tables
+
 
 # Load environment variables from .env
 load_dotenv()
+
+# Initialize Sentry
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),  # Replace this with your DSN URL or use an environment variable
+    integrations=[FlaskIntegration()],
+    traces_sample_rate=1.0,  # Adjust sampling rate if needed
+    environment=os.getenv("FLASK_ENV", "development"),  # Set to "production" in production
+    send_default_pii=True  # Enable personal identifiable information for better logs
+)
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -22,8 +39,36 @@ app.secret_key = os.getenv("FLASK_SECRET")
 # Set app configurations
 app.permanent_session_lifetime = timedelta(minutes=30)
 
+csrf = CSRFProtect(app)
+
 # Set up logging
-logging.basicConfig(level=logging.DEBUG)
+LOGGING_CONFIG = {
+    'version': 1,
+    'formatters': {
+        'default': {
+            'format': '[%(asctime)s] %(levelname)s in %(module)s: %(message)s',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'default',
+        },
+    },
+    'root': {
+        'level': 'INFO',
+        'handlers': ['console'],
+    },
+}
+
+if os.getenv("ENV") == "production":
+    app.config['SESSION_COOKIE_SECURE'] = True  # Use HTTPS (enable in production)
+    app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to cookies
+    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Mitigate CSRF risks
+    app.config['REMEMBER_COOKIE_DURATION'] = timedelta(minutes=60)  # Session length
+
+
+logging.config.dictConfig(LOGGING_CONFIG)
 
 # Initialize OAuth and LoginManager
 oauth = OAuth(app)
@@ -36,11 +81,33 @@ login_manager.login_message = "Please log in to access this page."
 login_manager.login_message_category = "error"
 
 
+# Initialize the database connection using Flask's `g`
+def get_db():
+    if 'db' not in g:
+        g.db = sqlite3.connect(DB_PATH)
+        g.db.row_factory = sqlite3.Row  # Enables column-based access
+    return g.db
+
+
+# Close the database connection when the app context is destroyed
+@app.teardown_appcontext
+def close_db(exception):
+    db = g.pop('db', None)
+    if db:
+        db.close()
+
+
 # Handle unauthorized access by redirecting to login
 @login_manager.unauthorized_handler
 def handle_unauthorized():
     app.logger.warning("Unauthorized access attempt.")
     return redirect(url_for("login"))
+
+
+# Initialize the database when the app starts
+@app.before_request
+def initialize_database():
+    create_db_tables(get_db())
 
 
 google = oauth.register(
@@ -62,18 +129,11 @@ google = oauth.register(
 
 # Mock User class for simplicity
 class User(UserMixin):
-    def __init__(self, id_, name, email):
+    def __init__(self, id_, name, email, role):
         self.id = id_
         self.name = name
         self.email = email
-
-
-users = {}  # A simple in-memory user store
-
-
-@login_manager.user_loader
-def load_user(user_id):
-    return users.get(user_id)
+        self.role = role
 
 
 @app.route("/login")
@@ -81,36 +141,44 @@ def login():
     return google.authorize_redirect(url_for("callback", _external=True))
 
 
-# Load allowed users from environment
-ALLOWED_USERS = set(os.getenv("ALLOWED_USERS", "").split(","))
+def role_required(*required_roles):
+    def decorator(f):
+        @wraps(f)
+        def wrapped(*args, **kwargs):
+            if not current_user.is_authenticated or current_user.role not in required_roles:
+                abort(403)  # Forbidden access
+            return f(*args, **kwargs)
+        return wrapped
+    return decorator
 
 
 @app.route("/callback")
 def callback():
     token = google.authorize_access_token()
-    print("Token:", token)  # Debugging
-    user_info = google.get("userinfo").json()
-    print("User Info:", user_info)  # Debugging
 
-    # Check if token has expired or is invalid
     if not token or token.get('expires_in', 0) <= 0:
         print("Token expired or missing, redirecting to login.")
         return redirect(url_for("login"))
 
-    # Use email as the unique user identifier
+    user_info = google.get("userinfo").json()
     user_email = user_info.get("email")
-    if not user_email or user_email not in ALLOWED_USERS:
+
+    if not user_email:
+        flash("Login failed: No email found.", "error")
+        return redirect(url_for("login"))
+
+    # Query database for user
+    user_data = query_db(
+        "SELECT id, email, name, role, active FROM users WHERE email = ?",
+        (user_email,), one=True
+    )
+
+    if not user_data or not user_data[4]:  # Check if user exists and is active
+        flash("Access denied: Unauthorized user.", "error")
         return render_template('403.html'), 403
 
-    session.permanent = True
-
-    # Use email as the user_id and proceed with login
-    user_id = user_email
-    user_name = user_info.get("name", "Unknown")  # Optional, for display purposes
-
-    # Create the user and log them in
-    user = User(id_=user_id, name=user_name, email=user_email)
-    users[user_id] = user
+    # Log the user in
+    user = User(id_=user_data[0], name=user_data[2], email=user_data[1], role=user_data[3])
     login_user(user)
 
     return redirect(url_for("admin"))
@@ -127,37 +195,16 @@ def logout():
 DB_PATH = os.getenv("DATABASE_PATH", "customers.db")
 
 
-# Function to initialize the database
-def create_customers_table():
-    try:
-        conn = sqlite3.connect(DB_PATH)
-        cur = conn.cursor()
-        cur.execute('''
-            CREATE TABLE IF NOT EXISTS customers (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                dd_name TEXT,
-                cbr_name TEXT,
-                obfuscated_id TEXT NOT NULL UNIQUE
-            )
-        ''')
-        conn.commit()
-        conn.close()
-        print("Database and table created successfully")
-    except sqlite3.Error as e:
-        print(f"Database initialization error: {e}")
-
-
 # Helper function to interact with the database
 def query_db(query, args=(), one=False):
     try:
-        with sqlite3.connect(DB_PATH) as conn:
-            cur = conn.cursor()
-            cur.execute(query, args)
-            rv = cur.fetchall()
-            conn.commit()
-            return (rv[0] if rv else None) if one else rv
+        cur = get_db().cursor()
+        cur.execute(query, args)
+        rv = cur.fetchall()
+        get_db().commit()
+        return (rv[0] if rv else None) if one else rv
     except sqlite3.Error as e:
-        print(f"Database error: {e}")
+        app.logger.error(f"Database error: {e}")
         return None
 
 
@@ -168,8 +215,8 @@ def home():
 
 @app.route('/admin', methods=['GET', 'POST'])
 @login_required
+@role_required('admin', 'user')  # Allow both roles
 def admin():
-    create_customers_table()
     if request.method == 'POST':
         dd_name = request.form['dd_name']
         cbr_name = request.form['cbr_name']
@@ -205,10 +252,8 @@ def show_report(obfuscated_id):
 
 #    try:
     # Fetch data for both instances
-    conn = sqlite3.connect(DB_PATH)
-    data_dd = get_open_orders(conn, customer[0], "DD")
-    data_cbr = get_open_orders(conn, customer[1], "CBR")
-    conn.close()
+    data_dd = get_open_orders(get_db(), customer[0], "DD")
+    data_cbr = get_open_orders(get_db(), customer[1], "CBR")
 
     # Combine the results
     combined_data = data_cbr + data_dd
@@ -234,6 +279,7 @@ def show_report(obfuscated_id):
 
 @app.route('/delete/<int:customer_id>')
 @login_required
+@role_required('admin', 'user')  # Allow both roles
 def delete_customer(customer_id):
     query_db("DELETE FROM customers WHERE id = ?", (customer_id,))
     return redirect(url_for('admin'))
@@ -241,6 +287,7 @@ def delete_customer(customer_id):
 
 @app.route('/edit/<int:customer_id>', methods=['GET', 'POST'])
 @login_required
+@role_required('admin', 'user')  # Allow both roles
 def edit_customer(customer_id):
     if request.method == 'POST':
         # Fetch updated form data
@@ -282,37 +329,32 @@ def work_in_progress(order_no):
 
 @app.route('/status_mapping')
 @login_required
+@role_required('admin', 'user')  # Allow both roles
 def list_status_mappings():
-    conn = sqlite3.connect(DB_PATH)
-    mappings = get_status_mappings(conn)
-    conn.close()
+    mappings = get_status_mappings(get_db())
     return render_template('status_mappings.html', mappings=mappings)
 
 
 # Error Handlers
 @app.route('/status_mapping/edit/<int:mapping_id>', methods=['GET', 'POST'])
+@role_required('admin', 'user')  # Allow both roles
 def edit_status_mapping_route(mapping_id):
-    conn = sqlite3.connect(DB_PATH)
-
     if request.method == 'POST':
         custom_status = request.form['custom_status']
         active = 'active' in request.form
-        edit_status_mapping(conn, mapping_id, custom_status, active)
-        conn.close()
+        edit_status_mapping(get_db(), mapping_id, custom_status, active)
         return redirect(url_for('list_status_mappings'))
 
-    mapping = get_status_mapping(conn, mapping_id)
-    conn.close()
+    mapping = get_status_mapping(get_db(), mapping_id)
     return render_template('edit_status_mapping.html', mapping=mapping)
 
 
 @app.route('/refresh_statuses', methods=['POST'])
+@role_required('admin')  # Allow both roles
 def refresh_statuses():
     try:
         # Call the function to refresh statuses
-        conn = sqlite3.connect(DB_PATH)
-        populate_status_mapping_table(conn)
-        conn.close()
+        populate_status_mapping_table(get_db())
         flash("Statuses refreshed successfully.", "success")
     except Exception as e:
         flash(f"Failed to refresh statuses: {e}", "danger")
@@ -321,39 +363,149 @@ def refresh_statuses():
     return redirect(url_for('list_status_mappings'))
 
 
-@app.errorhandler(401)
-def forbidden(error):
-    return render_template('401.html'), 401
+@app.errorhandler(HTTPException)
+def handle_http_exception(e):
+    """Handle specific HTTP errors with custom pages or fall back to a generic page."""
+    app.logger.error(f"HTTP Error {e.code}: {e.description}")
+
+    # Optionally log this error to Sentry or another monitoring tool
+    sentry_sdk.capture_exception(e)
+
+    # Check if a specific error page exists for the given code
+    if e.code in {401, 403, 404, 405, 429, 500}:
+        template_name = f"{e.code}.html"
+    else:
+        template_name = "error.html"
+
+    # Render the template with the provided error details
+    return render_template(template_name, code=e.code, message=e.description), e.code
 
 
-@app.errorhandler(403)
-def forbidden(error):
-    return render_template('403.html'), 403
+@app.errorhandler(Exception)
+def handle_exception(e):
+    """Handle unexpected errors like database failures or crashes."""
+    app.logger.error(f"Unexpected Server Error: {e}")
+
+    # Optionally log this error to Sentry or another monitoring tool
+    sentry_sdk.capture_exception(e)
+
+    # Fall back to a generic error page with a 500 status code
+    return render_template(
+        "error.html",
+        code=500,
+        message=str(e) or "An unexpected server error occurred."
+    ), 500
 
 
-@app.errorhandler(404)
-def page_not_found(error):
-    return render_template('404.html'), 404
+@app.route('/manage_users')
+@login_required
+@role_required('admin')
+def manage_users():
+    users = query_db("SELECT id, email, name, role, active FROM users")
+    return render_template('manage_users.html', users=users)
 
 
-@app.errorhandler(405)
-def page_not_found(error):
-    return render_template('405.html'), 405
+@app.route('/add_user', methods=['POST'])
+@login_required
+@role_required('admin')
+def add_user():
+    email = request.form['email']
+    name = request.form['name']
+    role = request.form['role']
+
+    try:
+        query_db(
+            "INSERT INTO users (email, name, role) VALUES (?, ?, ?)",
+            (email, name, role)
+        )
+        flash("User added successfully.", "success")
+    except sqlite3.IntegrityError:
+        flash("Email already exists.", "danger")
+
+    return redirect(url_for('manage_users'))
 
 
-@app.errorhandler(429)
-def page_not_found(error):
-    return render_template('429.html'), 429
+@app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
+@login_required
+@role_required('admin')
+def edit_user(user_id):
+    if request.method == 'POST':
+        email = request.form['email']
+        name = request.form['name']
+        role = request.form['role']
+
+        query_db(
+            "UPDATE users SET email = ?, name = ?, role = ? WHERE id = ?",
+            (email, name, role, user_id)
+        )
+
+        flash("User updated successfully.", "success")
+        return redirect(url_for('manage_users'))
+
+    # Pre-fill form for editing
+    user = query_db("SELECT id, email, name, role FROM users WHERE id = ?", (user_id,), one=True)
+
+    if not user:
+        flash("User not found.", "danger")
+        return redirect(url_for('manage_users'))
+
+    return render_template('edit_user.html', user=user)
 
 
-@app.errorhandler(500)
-def internal_server_error(error):
-    return render_template('500.html'), 500
+@app.route('/toggle_user_status/<int:user_id>')
+@login_required
+@role_required('admin')
+def toggle_user_status(user_id):
+    user = query_db("SELECT active FROM users WHERE id = ?", (user_id,), one=True)
+
+    if not user:
+        flash("User not found.", "danger")
+        return redirect(url_for('manage_users'))
+
+    new_status = 0 if user[0] == 1 else 1
+    query_db("UPDATE users SET active = ? WHERE id = ?", (new_status, user_id))
+
+    flash("User status updated successfully.", "success")
+    return redirect(url_for('manage_users'))
 
 
-@app.route('/500')
-def error500():
-    return 1/0
+@app.route('/delete_user/<int:user_id>')
+@login_required
+@role_required('admin')
+def delete_user(user_id):
+    query_db("DELETE FROM users WHERE id = ?", (user_id,))
+
+    flash("User deleted successfully.", "success")
+    return redirect(url_for('manage_users'))
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    user_data = query_db("SELECT id, email, name, role, active FROM users WHERE id = ?", (user_id,), one=True)
+
+    if user_data and user_data[4]:  # Ensure user exists and is active
+        return User(id_=user_data[0], name=user_data[2], email=user_data[1], role=user_data[3])
+    return None
+
+
+@app.route('/sentry-debug')
+def trigger_error():
+    division_by_zero = 1 / 0
+
+
+# Required Environment Variables
+REQUIRED_ENV_VARS = [
+    "BUZ_DD_USERNAME", "BUZ_DD_PASSWORD",
+    "BUZ_CBR_USERNAME", "BUZ_CBR_PASSWORD",
+    "FLASK_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
+    "GOOGLE_REDIRECT_URI", "DATABASE_PATH", "ALLOWED_USERS", "SERVER_NAME"
+]
+
+# Validate Environment Variables
+missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
+
+if missing_vars:
+    raise RuntimeError(f"Missing required environment variables: {', '.join(missing_vars)}")
 
 
 if __name__ == '__main__':

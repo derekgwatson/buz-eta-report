@@ -7,6 +7,7 @@
 
 <!-- Form with Action Set -->
 <form method="post" action="{{ url_for('edit_status_mapping_route', mapping_id=mapping[0]) }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="odata_status">OData Status:</label>
     <input type="text" name="odata_status" value="{{ mapping[1] }}" readonly><br>
 

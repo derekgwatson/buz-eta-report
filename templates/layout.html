@@ -189,8 +189,11 @@
 
 {% if current_user.is_authenticated %}
 <nav>
-    <a href="{{ url_for('admin') }}">Admin Page</a>
+    <a href="{{ url_for('admin') }}">Reports</a>
     <a href="{{ url_for('list_status_mappings') }}">Status Mapping</a>
+    {% if current_user.role == 'admin' %}
+        <a href="{{ url_for('manage_users') }}">Manage Users</a>
+    {% endif %}
 </nav>
 {% endif %}
 

@@ -4,6 +4,7 @@
 
 {% block content %}
 <form method="post" id="customerForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h2>Edit Customer</h2>
     <label for="dd_name">DD Name:</label>
     <input type="text" id="dd_name" name="dd_name" value="{{ customer[1] }}">

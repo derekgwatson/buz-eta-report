@@ -1,19 +1,3 @@
-import sqlite3
-
-
-def create_status_mapping_table(conn):
-    cursor = conn.cursor()
-    cursor.execute('''
-    CREATE TABLE IF NOT EXISTS status_mapping (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        odata_status TEXT UNIQUE NOT NULL,
-        custom_status TEXT,
-        active BOOLEAN NOT NULL DEFAULT TRUE
-    );
-    ''')
-    conn.commit()
-
-
 def update_status_mapping(conn, odata_statuses):
     cursor = conn.cursor()
 
@@ -34,4 +18,38 @@ def update_status_mapping(conn, odata_statuses):
         ON CONFLICT (odata_status) DO UPDATE SET active = TRUE;
         ''', (status,))
 
+    conn.commit()
+
+
+def create_db_tables(conn):
+    cur = conn.cursor()
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            email TEXT NOT NULL UNIQUE,
+            name TEXT,
+            role TEXT NOT NULL DEFAULT 'user',
+            active INTEGER NOT NULL DEFAULT 1
+        )
+    ''')
+
+    cur.execute('''
+        CREATE TABLE IF NOT EXISTS customers (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dd_name TEXT,
+            cbr_name TEXT,
+            obfuscated_id TEXT NOT NULL UNIQUE
+        )
+    ''')
+
+    cur.execute('''
+    CREATE TABLE IF NOT EXISTS status_mapping (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        odata_status TEXT UNIQUE NOT NULL,
+        custom_status TEXT,
+        active BOOLEAN NOT NULL DEFAULT TRUE
+    );
+    ''')
+    print("Database tables created successfully")
     conn.commit()

@@ -1,0 +1,10 @@
+{% extends "layout.html" %}
+
+{% block title %}Error {{ code }}{% endblock %}
+
+{% block content %}
+<h1>Oops! Something went wrong.</h1>
+<p>Error Code: {{ code }}</p>
+<p>{{ message }}</p>
+<a href="{{ url_for('home') }}">Go back home</a>
+{% endblock %}
