@@ -2,7 +2,7 @@ import os
 from services.database import get_db, query_db, execute_query
 from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, g
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, g, send_from_directory
 from flask_login import current_user
 import secrets
 from services.buz_data import get_open_orders
@@ -499,6 +499,14 @@ def load_user(user_id):
 @app.route('/sentry-debug')
 def trigger_error():
     division_by_zero = 1 / 0
+
+
+# Route for favicon.ico
+@app.route('/favicon.ico')
+def favicon():
+    return send_from_directory(
+        app.static_folder, 'favicon.ico', mimetype='image/vnd.microsoft.icon'
+    )
 
 
 # Required Environment Variables
