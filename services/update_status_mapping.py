@@ -1,11 +1,10 @@
 from services.buz_data import get_statuses
+from services.database import execute_query
 
 
-def update_status_mapping(conn, odata_statuses):
-    cursor = conn.cursor()
-
+def update_status_mapping(odata_statuses):
     # Mark old statuses as inactive
-    cursor.execute('''
+    execute_query('''
     UPDATE status_mapping 
     SET active = FALSE 
     WHERE odata_status NOT IN (
@@ -15,22 +14,18 @@ def update_status_mapping(conn, odata_statuses):
 
     # Insert new or reactivate existing statuses
     for status in odata_statuses:
-        cursor.execute('''
+        execute_query('''
         INSERT INTO status_mapping (odata_status, active) 
         VALUES (?, TRUE)
         ON CONFLICT (odata_status) DO UPDATE SET active = TRUE;
         ''', (status,))
 
-    conn.commit()
-
     # Insert any new statuses into the `status_mapping` table
     for status in odata_statuses:
-        cursor.execute('''
+        execute_query('''
         INSERT OR IGNORE INTO status_mapping (odata_status, active)
         VALUES (?, TRUE);
         ''', (status,))
-
-    conn.commit()
 
 
 def get_status_mappings(conn):
@@ -45,7 +40,7 @@ def get_status_mappings(conn):
     return mappings
 
 
-def get_status_mapping(conn, mapping_id):
+def get_status_mapping(mapping_id, conn):
     cursor = conn.cursor()
     cursor.execute('SELECT id, odata_status, custom_status, active FROM status_mapping WHERE id = ?', (mapping_id,))
     mapping = cursor.fetchone()
@@ -113,7 +108,7 @@ def populate_status_mapping_table(conn):
     conn.commit()
 
 
-def edit_status_mapping(conn, mapping_id, custom_status, active):
+def edit_status_mapping(mapping_id, custom_status, active, conn):
     cursor = conn.cursor()
 
     cursor.execute('''

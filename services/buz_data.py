@@ -74,17 +74,6 @@ def get_open_orders(conn, customer, instance):
 
 
 
-def get_schedule_jobs_details(order_no, endpoint, instance):
+def get_data_by_order_no(order_no, endpoint, instance):
     """Fetch and return JobsScheduleDetails data for a given order number."""
-    odata_client = ODataClient(instance)
-    # Build the OData filter
-    filter_conditions = [
-        f"RefNo eq '{order_no}'",
-    ]
-
-    try:
-        # Build the filtered URL
-        return odata_client.get(endpoint, filter_conditions)
-
-    except requests.exceptions.RequestException as e:
-        return {"error": f"Failed to fetch JobsScheduleDetails: {str(e)}"}
+    return  ODataClient(instance).get(endpoint, [ f"RefNo eq '{order_no}'" ])

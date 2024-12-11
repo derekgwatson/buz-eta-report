@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, g
 from flask_login import current_user
 import secrets
-from services.buz_data import get_open_orders, get_schedule_jobs_details
+from services.buz_data import get_open_orders
 from authlib.integrations.flask_client import OAuth
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from datetime import timedelta
@@ -99,7 +99,7 @@ def handle_unauthorized():
 # Initialize the database when the app starts
 @app.before_request
 def initialize_database():
-    create_db_tables(get_db())
+    create_db_tables()
 
 
 google = oauth.register(
@@ -183,7 +183,6 @@ def logout():
     return render_template('home.html')
 
 
-# Helper function to interact with the database
 @app.route('/')
 def home():
     return render_template('home.html')
@@ -226,31 +225,34 @@ def show_report(obfuscated_id):
         error_message = f"No report found for ID: {obfuscated_id}"
         return render_template('404.html', message=error_message), 404
 
-#    try:
-    # Fetch data for both instances
-    data_dd = get_open_orders(get_db(), customer[0], "DD")
-    data_cbr = get_open_orders(get_db(), customer[1], "CBR")
+    try:
+        # Fetch data for both instances
+        data_dd = get_open_orders(get_db(), customer[0], "DD")
+        data_cbr = get_open_orders(get_db(), customer[1], "CBR")
 
-    # Combine the results
-    combined_data = data_cbr + data_dd
+        # Combine the results
+        combined_data = data_cbr + data_dd
 
-    # Prepare customer name: handle the cases based on the conditions
-    if customer[0] == customer[1] or customer[1] == '':
-        customer_name = customer[0]  # Use customer[0] if they are the same or if customer[1] is empty
-    elif customer[0] == '':
-        customer_name = customer[1]  # Use customer[1] if customer[0] is empty
-    else:
-        customer_name = f"{customer[0]} / {customer[1]}"  # Use both names if they are different
+        # Prepare customer name: handle the cases based on the conditions
+        if customer[0] == customer[1] or customer[1] == '':
+            customer_name = customer[0]  # Use customer[0] if they are the same or if customer[1] is empty
+        elif customer[0] == '':
+            customer_name = customer[1]  # Use customer[1] if customer[0] is empty
+        else:
+            customer_name = f"{customer[0]} / {customer[1]}"  # Use both names if they are different
 
-    # Pass the customer name along with the data to the template
-    if combined_data:
-        return render_template('report.html', data=combined_data, customer_name=customer_name)
+        # Pass the customer name along with the data to the template
+        if combined_data:
+            return render_template('report.html', data=combined_data, customer_name=customer_name)
 
-    return render_template('report.html', customer_name=customer_name)
+        return render_template('report.html', customer_name=customer_name)
 
-#    except Exception as e:
-#        error_message = f"Failed to generate report for ID: {obfuscated_id}. Error: {str(e)}"
-#        return render_template('500.html', message=error_message), 500
+    except Exception as e:
+        if app.debug:
+            raise e
+        else:
+            error_message = f"Failed to generate report for ID: {obfuscated_id}. Error: {str(e)}"
+            return render_template('500.html', message=error_message), 500
 
 
 @app.route('/delete/<int:customer_id>')
@@ -291,23 +293,42 @@ def edit_customer(customer_id):
 @login_required
 def jobs_schedule(order_no):
     """Route to fetch JobsScheduleDetails for a given order number."""
-    data = get_schedule_jobs_details(order_no, "JobsScheduleDetailed", "DD")
-    return jsonify(data)
+    try:
+        # Call the function to get the data
+        data = get_data_by_order_no(order_no, "JobsScheduleDetailed", "DD")
+        return jsonify(data)
+
+    except requests.exceptions.RequestException as e:
+        # Handle the error based on the environment
+        if app.debug:
+            # In non-production environments, raise the exception for debugging
+            raise e
+        else:
+            return jsonify({"error": f"Failed to fetch JobsScheduleDetails: {str(e)}"}), 500
 
 
 @app.route('/wip/<order_no>', methods=['GET'])
 @login_required
 def work_in_progress(order_no):
     """Route to fetch WorkInProgress for a given order number."""
-    data = get_schedule_jobs_details(order_no, "WorkInProgress")
-    return jsonify(data)
+    try:
+        data = get_data_by_order_no(order_no, "WorkInProgress")
+        return jsonify(data)
+
+    except requests.exceptions.RequestException as e:
+        # Handle the error based on the environment
+        if app.debug:
+            # In non-production environments, raise the exception for debugging
+            raise e
+        else:
+            return jsonify({"error": f"Failed to fetch WorkInProgress: {str(e)}"}), 500
 
 
 @app.route('/status_mapping')
 @login_required
 @role_required('admin', 'user')  # Allow both roles
 def list_status_mappings():
-    mappings = get_status_mappings(get_db())
+    mappings = get_status_mappings(conn=get_db())
     return render_template('status_mappings.html', mappings=mappings)
 
 
@@ -318,10 +339,10 @@ def edit_status_mapping_route(mapping_id):
     if request.method == 'POST':
         custom_status = request.form['custom_status']
         active = 'active' in request.form
-        edit_status_mapping(get_db(), mapping_id, custom_status, active)
+        edit_status_mapping(mapping_id, custom_status, active, conn=get_db())
         return redirect(url_for('list_status_mappings'))
 
-    mapping = get_status_mapping(get_db(), mapping_id)
+    mapping = get_status_mapping(mapping_id=mapping_id, conn=get_db())
     return render_template('edit_status_mapping.html', mapping=mapping)
 
 
@@ -333,7 +354,10 @@ def refresh_statuses():
         populate_status_mapping_table(get_db())
         flash("Statuses refreshed successfully.", "success")
     except Exception as e:
-        flash(f"Failed to refresh statuses: {e}", "danger")
+        if app.debug:
+            raise e
+        else:
+            flash(f"Failed to refresh statuses: {e}", "danger")
 
     # Redirect back to the edit page
     return redirect(url_for('list_status_mappings'))
@@ -353,8 +377,11 @@ def handle_http_exception(e):
     else:
         template_name = "error.html"
 
-    # Render the template with the provided error details
-    return render_template(template_name, code=e.code, message=e.description), e.code
+    if app.debug:
+        raise e
+    else:
+        # Render the template with the provided error details
+        return render_template(template_name, code=e.code, message=e.description), e.code
 
 
 @app.errorhandler(Exception)
@@ -365,12 +392,15 @@ def handle_exception(e):
     # Optionally log this error to Sentry or another monitoring tool
     sentry_sdk.capture_exception(e)
 
-    # Fall back to a generic error page with a 500 status code
-    return render_template(
-        "error.html",
-        code=500,
-        message=str(e) or "An unexpected server error occurred."
-    ), 500
+    if app.debug:
+        raise e
+    else:
+        # Fall back to a generic error page with a 500 status code
+        return render_template(
+            "error.html",
+            code=500,
+            message=str(e) or "An unexpected server error occurred."
+        ), 500
 
 
 @app.route('/manage_users')
@@ -476,7 +506,7 @@ REQUIRED_ENV_VARS = [
     "BUZ_DD_USERNAME", "BUZ_DD_PASSWORD",
     "BUZ_CBR_USERNAME", "BUZ_CBR_PASSWORD",
     "FLASK_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
-    "GOOGLE_REDIRECT_URI", "DATABASE_PATH", "SERVER_NAME"
+    "GOOGLE_REDIRECT_URI", "DATABASE_PATH", "SERVER_NAME", "SENTRY_DSN"
 ]
 
 # Validate Environment Variables

@@ -12,8 +12,9 @@ def test_query_db(app):
 
 class TestOpenOrders(unittest.TestCase):
 
-    @patch("your_module.ODataClient")
-    def test_get_open_orders(self, mock_odata_client):
+    @patch("services.buz_data.ODataClient")  # Ensure the correct path for patching
+    @patch("services.buz_data.conn.cursor")  # Mock the database connection
+    def test_get_open_orders(self, mock_cursor, mock_odata_client):
         # Mock response data
         mock_data = [
             {
@@ -35,12 +36,15 @@ class TestOpenOrders(unittest.TestCase):
                 "FixedLine": 1,  # Duplicate to test drop_duplicates
             },
         ]
-
-        # Set mock return value
         mock_odata_client.return_value.get.return_value = mock_data
 
+        # Mock the database cursor
+        mock_cursor.return_value.fetchall.return_value = [
+            ("In Progress", "Active")  # Sample status mapping
+        ]
+
         # Call the function
-        result = get_open_orders("Customer A", "TestInstance")
+        result = get_open_orders(MagicMock(), "Customer A", "TestInstance")
 
         # Expected result after deduplication and sorting
         expected = [
@@ -50,20 +54,20 @@ class TestOpenOrders(unittest.TestCase):
                 "DateScheduled": "2024-12-01",
                 "ProductionLine": "Line 1",
                 "InventoryItem": "Item 1",
-                "ProductionStatus": "In Progress",
+                "ProductionStatus": "Active",  # Custom status mapped
                 "FixedLine": 1,
             }
         ]
 
         self.assertEqual(result, expected)
 
-    @patch("your_module.ODataClient")
+    @patch("services.buz_data.ODataClient")
     def test_get_open_orders_empty(self, mock_odata_client):
         mock_odata_client.return_value.get.return_value = []
-        result = get_open_orders("NonExistingCustomer", "TestInstance")
+        result = get_open_orders(MagicMock(), "NonExistingCustomer", "TestInstance")
         self.assertEqual(result, [])
 
-    @patch("your_module.ODataClient")
+    @patch("services.buz_data.ODataClient")
     def test_get_schedule_jobs_details(self, mock_odata_client):
         mock_data = [
             {"RefNo": "ORD001", "JobDetails": "Detail A"},
@@ -74,7 +78,7 @@ class TestOpenOrders(unittest.TestCase):
         result = get_schedule_jobs_details("ORD001", "JobsScheduleDetailed", "TestInstance")
         self.assertEqual(result, mock_data)
 
-    @patch("your_module.ODataClient")
+    @patch("services.buz_data.ODataClient")
     def test_get_schedule_jobs_details_error(self, mock_odata_client):
         mock_odata_client.return_value.get.side_effect = requests.exceptions.RequestException("Network error")
         result = get_schedule_jobs_details("ORD001", "JobsScheduleDetailed", "TestInstance")

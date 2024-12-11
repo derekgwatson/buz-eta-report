@@ -4,7 +4,7 @@ import os
 import requests
 from requests.auth import HTTPBasicAuth
 from dotenv import load_dotenv
-
+import logging
 
 class ODataClient:
     """
@@ -21,24 +21,27 @@ class ODataClient:
         Initializes the ODataClient instance with the root URL and credentials.
 
         Args:
-            source (str): The oData source we're getting data from
+            source (str): The OData source we're getting data from
         """
         # Load environment variables from .env file
         load_dotenv()
 
         if source == 'DD':
-            root_url = "https://api.buzmanager.com/reports/DESDR"
-            username = os.getenv("BUZ_DD_USERNAME")
-            password = os.getenv("BUZ_DD_PASSWORD")
+            self.root_url = "https://api.buzmanager.com/reports/DESDR"
+            self.username = os.getenv("BUZ_DD_USERNAME")
+            self.password = os.getenv("BUZ_DD_PASSWORD")
         elif source == 'CBR':
-            root_url = "https://api.buzmanager.com/reports/WATSO"
-            username = os.getenv("BUZ_CBR_USERNAME")
-            password = os.getenv("BUZ_CBR_PASSWORD")
+            self.root_url = "https://api.buzmanager.com/reports/WATSO"
+            self.username = os.getenv("BUZ_CBR_USERNAME")
+            self.password = os.getenv("BUZ_CBR_PASSWORD")
         else:
-            raise f"Unrecognised source: {source}"
+            raise ValueError(f"Unrecognised source: {source}")
 
-        self.root_url = root_url.rstrip('/')  # Ensure no trailing slash
-        self.auth = HTTPBasicAuth(username, password)
+        # Check if required environment variables are loaded
+        if not self.username or not self.password:
+            raise ValueError(f"Missing credentials for source: {source}")
+
+        self.auth = HTTPBasicAuth(self.username, self.password)
         self.source = source
 
     def get(self, endpoint: str, params: list) -> list:
@@ -53,7 +56,7 @@ class ODataClient:
             list: The JSON response from the OData service.
 
         Raises:
-            requests.HTTPError: If the response contains an HTTP error status.
+            requests.RequestException: If the response contains an HTTP error status or other request-related issues.
         """
         url = f"{self.root_url}/{endpoint.lstrip('/')}"
 
@@ -65,24 +68,41 @@ class ODataClient:
         other_params = {}  # Add other query parameters if needed
         query_params = {**encoded_filter, **other_params}
 
-        # Send the GET request
-        response = requests.get(url, params=query_params, auth=self.auth)
-        response.raise_for_status()  # Raise an exception for HTTP errors
+        try:
+            # Send the GET request
+            response = requests.get(url, params=query_params, auth=self.auth)
+            response.raise_for_status()  # Raise an exception for HTTP errors
 
-        # Process and reformat dates
-        formatted_data = []
-        for item in response.json().get("value", []):
-            item['Instance'] = self.source
+            # Process and reformat dates
+            formatted_data = []
+            response_json = response.json()
+            if "value" not in response_json:
+                logging.warning(f"No 'value' key in response from {url}.")
+                return formatted_data  # Return an empty list if 'value' is not present
 
-            # Ensure DateScheduled is present and valid
-            original_date = item.get("DateScheduled")
-            if original_date:
-                try:
-                    parsed_date = datetime.strptime(original_date, "%Y-%m-%dT%H:%M:%SZ")
-                    item["DateScheduled"] = parsed_date.strftime("%d %b %Y")  # Format as "27 Nov 2024"
-                except ValueError:
-                    pass  # Keep the original date if parsing fails
+            for item in response_json["value"]:
+                item['Instance'] = self.source
 
-            formatted_data.append(item)
+                # Ensure DateScheduled is present and valid
+                original_date = item.get("DateScheduled")
+                if original_date:
+                    try:
+                        parsed_date = datetime.strptime(original_date, "%Y-%m-%dT%H:%M:%SZ")
+                        item["DateScheduled"] = parsed_date.strftime("%d %b %Y")  # Format as "27 Nov 2024"
+                    except ValueError:
+                        logging.warning(f"Failed to parse date: {original_date}. Keeping original value.")
+                        pass  # Keep the original date if parsing fails
 
-        return formatted_data
+                formatted_data.append(item)
+
+            return formatted_data
+
+        except requests.exceptions.RequestException as e:
+            # Catch all request-related exceptions
+            logging.error(f"Request failed: {e}")
+            raise  # Re-raise the exception to propagate it up
+
+        except Exception as e:
+            # Catch unexpected exceptions
+            logging.error(f"An unexpected error occurred: {e}")
+            raise  # Re-raise the exception to propagate it up
