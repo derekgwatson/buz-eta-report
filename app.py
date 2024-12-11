@@ -509,6 +509,11 @@ def favicon():
     )
 
 
+@app.route('/robots.txt')
+def robots_txt():
+    return send_from_directory(app.static_folder, 'robots.txt')
+
+
 # Required Environment Variables
 REQUIRED_ENV_VARS = [
     "BUZ_DD_USERNAME", "BUZ_DD_PASSWORD",

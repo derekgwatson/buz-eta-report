@@ -1,4 +1,4 @@
-# secret stuff
+# Secret stuff
 .env
 credentials/client_secret.json
 
@@ -17,5 +17,5 @@ __pycache__/
 deploy.sh
 run.bat
 
-# db
+# Other
 customers.db
