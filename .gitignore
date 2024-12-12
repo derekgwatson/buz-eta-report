@@ -12,6 +12,7 @@ bin/
 __pycache__/
 *.pyc
 *.pyo
+.idea/
 
 # Deployment Scripts (if applicable)
 deploy.sh

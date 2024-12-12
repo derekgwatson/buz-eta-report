@@ -96,12 +96,14 @@ def handle_unauthorized():
     return redirect(url_for("login"))
 
 
-# Initialize the database when the app starts
-@app.before_request
+@app.cli.command("init-db")
 def initialize_database():
+    """Initialize the database tables."""
     create_db_tables()
+    print("Database initialized.")
 
 
+# Initialize the database when the app starts
 google = oauth.register(
     name="google",
     client_id=os.getenv("GOOGLE_CLIENT_ID"),

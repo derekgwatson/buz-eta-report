@@ -1,8 +1,8 @@
 import unittest
 from unittest.mock import patch, MagicMock
 import requests
-from services.buz_data import get_open_orders, get_schedule_jobs_details
-from services.buz_data import query_db
+from services.buz_data import get_open_orders
+from services.database import query_db
 
 
 def test_query_db(app):
@@ -10,8 +10,8 @@ def test_query_db(app):
         result = query_db("SELECT 1")
         assert result is not None
 
-class TestOpenOrders(unittest.TestCase):
 
+class TestOpenOrders(unittest.TestCase):
     @patch("services.buz_data.ODataClient")  # Ensure the correct path for patching
     @patch("services.buz_data.conn.cursor")  # Mock the database connection
     def test_get_open_orders(self, mock_cursor, mock_odata_client):

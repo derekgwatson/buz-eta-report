@@ -73,7 +73,6 @@ def get_open_orders(conn, customer, instance):
     return _sales_report.to_dict(orient="records")
 
 
-
 def get_data_by_order_no(order_no, endpoint, instance):
     """Fetch and return JobsScheduleDetails data for a given order number."""
-    return  ODataClient(instance).get(endpoint, [ f"RefNo eq '{order_no}'" ])
+    return ODataClient(instance).get(endpoint, [f"RefNo eq '{order_no}'"])
