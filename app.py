@@ -220,8 +220,14 @@ def admin():
     return render_template('admin.html')
 
 
-@app.route('/etas/<obfuscated_id>')
-def show_report(obfuscated_id):
+@app.route('/etas/<code>')
+def eta_report_redirect(code):
+    # Redirect to the new URL format
+    return redirect(url_for('eta_report', obfuscated_id=code), code=301)
+
+
+@app.route('/<obfuscated_id>')
+def eta_report(obfuscated_id):
     customer = query_db("SELECT dd_name, cbr_name FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
     if not customer:
         error_message = f"No report found for ID: {obfuscated_id}"
