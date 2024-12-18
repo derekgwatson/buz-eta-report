@@ -33,9 +33,9 @@
         {% for customer in customers %}
         <tr>
             <td>{{ customer[1] or customer[2] }}</td>
-            <td class="url-column" data-full-url="{{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) }}">
-                <a href="{{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) }}" id="url-{{ loop.index }}">
-                    {{ request.url_root }}{{ url_for('show_report', obfuscated_id=customer[3]) | truncate(30, True) }}
+            <td class="url-column" data-full-url="{{ url_for('eta_report', _external=True, obfuscated_id=customer[3]) }}">
+                <a href="{{ url_for('eta_report', _external=True, obfuscated_id=customer[3]) }}" id="url-{{ loop.index }}">
+                    {{ url_for('eta_report', _external=True, obfuscated_id=customer[3]) | truncate(30, True) }}
                 </a>
             </td>
             <td class="actions">
