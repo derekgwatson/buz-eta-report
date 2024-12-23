@@ -276,8 +276,7 @@ document.addEventListener("DOMContentLoaded", () => {
     handleFilterVisibilityOnPageLoad();
 
     // Attach event listeners for dynamic filtering
-    const filterForm = document.getElementById("filterForm");
-    const dropdowns = filterForm.querySelectorAll("select");
+    const dropdowns = document.querySelectorAll("#filterForm select, #filterForm input[type='date']");
     dropdowns.forEach(dropdown => {
         dropdown.addEventListener("change", applyFilters); // Trigger filtering on change
     });
@@ -290,28 +289,34 @@ document.addEventListener("DOMContentLoaded", () => {
 });
 
 function handleFilterVisibilityOnPageLoad() {
-    // Safely get filter elements
-    const statusFilterElement = document.getElementById("statusFilter");
-    const groupFilterElement = document.getElementById("groupFilter");
-    const supplierFilterElement = document.getElementById("supplierFilter");
+    const filters = [
+        { element: document.getElementById("statusFilter"), label: document.getElementById("statusFilterLabel") },
+        { element: document.getElementById("groupFilter"), label: document.getElementById("groupFilterLabel") },
+        { element: document.getElementById("supplierFilter"), label: document.getElementById("supplierFilterLabel") },
+    ];
 
-    // Function to hide filter elements if not enough options
-    function handleFilterVisibility(filterElement, labelId) {
-        if (filterElement && filterElement.options.length <= 2) {
+    let visibleFilters = 0;
+
+    filters.forEach(filter => {
+        if (filter.element && filter.element.options.length <= 2) {
             // Hide the filter and its label
-            document.getElementById(labelId).style.display = "none";
-            filterElement.style.display = "none";
-        } else if (filterElement) {
-            // Show the filter and its label if it has more than 2 options
-            document.getElementById(labelId).style.display = "";
-            filterElement.style.display = "";
+            filter.label.style.display = "none";
+            filter.element.style.display = "none";
+        } else if (filter.element) {
+            // Show the filter and its label
+            filter.label.style.display = "";
+            filter.element.style.display = "";
+            visibleFilters++;
         }
-    }
+    });
 
-    // Handle visibility for each filter
-    handleFilterVisibility(statusFilterElement, "statusFilterLabel");
-    handleFilterVisibility(groupFilterElement, "groupFilterLabel");
-    handleFilterVisibility(supplierFilterElement, "supplierFilterLabel");
+    // Hide the entire filter block if no filters are visible
+    const filterForm = document.getElementById("filterForm");
+    if (visibleFilters === 0) {
+        filterForm.style.display = "none";
+    } else {
+        filterForm.style.display = "";
+    }
 }
 
 function applyFilters() {
