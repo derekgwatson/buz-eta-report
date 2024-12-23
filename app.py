@@ -18,6 +18,7 @@ from flask_wtf.csrf import CSRFProtect
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from services.database import create_db_tables
+from datetime import datetime
 
 
 # Load environment variables from .env
@@ -229,6 +230,7 @@ def eta_report_redirect(code):
 @app.route('/<obfuscated_id>')
 def eta_report(obfuscated_id):
     customer = query_db("SELECT dd_name, cbr_name FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
+
     if not customer:
         error_message = f"No report found for ID: {obfuscated_id}"
         return render_template('404.html', message=error_message), 404
@@ -241,6 +243,31 @@ def eta_report(obfuscated_id):
         # Combine the results
         combined_data = data_cbr + data_dd
 
+        # Group by RefNo
+        grouped_data = []
+        refno_to_date = {}
+
+        for item in combined_data:
+            ref_no = item.get("RefNo")
+            date_str = item.get("DateScheduled", "N/A")
+
+            if ref_no not in refno_to_date:
+                try:
+                    refno_to_date[ref_no] = datetime.strptime(date_str,
+                                                              "%d %b %Y") if date_str != "N/A" else datetime.min
+                except ValueError:
+                    refno_to_date[ref_no] = datetime.min  # Fallback for invalid date
+
+            # Add item to the group
+            group_entry = next((entry for entry in grouped_data if entry["RefNo"] == ref_no), None)
+            if not group_entry:
+                group_entry = {"RefNo": ref_no, "group_items": [], "DateScheduled": date_str}
+                grouped_data.append(group_entry)
+            group_entry["group_items"].append(item)
+
+            # Sort groups by DateScheduled
+        grouped_data.sort(key=lambda g: refno_to_date.get(g["RefNo"], datetime.min))
+
         # Prepare customer name: handle the cases based on the conditions
         if customer[0] == customer[1] or customer[1] == '':
             customer_name = customer[0]  # Use customer[0] if they are the same or if customer[1] is empty
@@ -249,9 +276,28 @@ def eta_report(obfuscated_id):
         else:
             customer_name = f"{customer[0]} / {customer[1]}"  # Use both names if they are different
 
+        def normalize_and_sort(values):
+            """
+            Normalizes a list of strings: converts to lowercase, capitalizes the first letter of each word,
+            removes duplicates, and sorts them alphabetically.
+            """
+            return sorted({value.strip().lower().title() for value in values if value and value != "N/A"})
+
+        # Compute unique filter options from combined data
+        unique_statuses = normalize_and_sort([item.get("ProductionStatus", "N/A") for item in combined_data])
+        unique_groups = normalize_and_sort([item.get("ProductionLine", "N/A") for item in combined_data])
+        unique_suppliers = normalize_and_sort([item.get("Instance", "N/A") for item in combined_data])
+
         # Pass the customer name along with the data to the template
         if combined_data:
-            return render_template('report.html', data=combined_data, customer_name=customer_name)
+            return render_template(
+                'report.html',
+                data=grouped_data,
+                customer_name=customer_name,
+                statuses=unique_statuses,
+                groups=unique_groups,
+                suppliers=unique_suppliers
+            )
 
         return render_template('report.html', customer_name=customer_name)
 
