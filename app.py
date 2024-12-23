@@ -276,17 +276,23 @@ def eta_report(obfuscated_id):
         else:
             customer_name = f"{customer[0]} / {customer[1]}"  # Use both names if they are different
 
-        def normalize_and_sort(values):
+        def normalize_and_sort(values, case="title"):
             """
             Normalizes a list of strings: converts to lowercase, capitalizes the first letter of each word,
             removes duplicates, and sorts them alphabetically.
             """
-            return sorted({value.strip().lower().title() for value in values if value and value != "N/A"})
+            if case == "upper":
+                return sorted({value.strip().upper() for value in values if value and value != "N/A"})
+            elif case == "lower":
+                return sorted({value.strip().lower() for value in values if value and value != "N/A"})
+            else:  # Default to title case
+                return sorted({value.strip().lower().title() for value in values if value and value != "N/A"})
 
         # Compute unique filter options from combined data
         unique_statuses = normalize_and_sort([item.get("ProductionStatus", "N/A") for item in combined_data])
         unique_groups = normalize_and_sort([item.get("ProductionLine", "N/A") for item in combined_data])
-        unique_suppliers = normalize_and_sort([item.get("Instance", "N/A") for item in combined_data])
+        unique_suppliers = normalize_and_sort([item.get("Instance", "N/A").upper() for item in combined_data],
+                                              case="upper")
 
         # Pass the customer name along with the data to the template
         if combined_data:
