@@ -11,8 +11,6 @@ def get_statuses(instance):
     filter_conditions = [
             "OrderStatus eq 'Work in Progress'",
             "ProductionStatus ne 'null'",
-            "ProductionStatus ne 'Invoiced'",
-            "ProductionStatus ne 'Cancelled'",
         ]
 
     # Fetch filtered SalesReport data
