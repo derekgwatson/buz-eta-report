@@ -180,7 +180,8 @@
             <!-- Order Header -->
             {% if group.group_items and group.group_items|length > 0 %}
                 <div class="order-header">
-                    <strong>Supplier:</strong> {{ group.group_items[0].Instance or 'N/A' }} |
+                    <strong>Supplier:</strong>
+                        <span id="SupplierCode">{{ group.group_items[0].Instance or 'N/A' }}</span> |
                     <strong>Expected:</strong> {{ group.DateScheduled or 'N/A' }} |
                     <strong>Order #:</strong> {{ group.RefNo or 'N/A' }} |
                     <strong>Ref:</strong> {{ group.group_items[0].Descn or 'N/A' }}
@@ -321,27 +322,28 @@ function handleFilterVisibilityOnPageLoad() {
 
 function applyFilters() {
     // Safely get filter values
-    const statusFilterElement = document.getElementById("statusFilter");
-    const groupFilterElement = document.getElementById("groupFilter");
-    const supplierFilterElement = document.getElementById("supplierFilter");
+    const statusFilter = document.getElementById("statusFilter").value.toLowerCase() || "";
+    const groupFilter = document.getElementById("groupFilter").value.toLowerCase() || "";
+    const supplierFilter = document.getElementById("supplierFilter").value.toUpperCase() || "";
 
-    const statusFilter = statusFilterElement?.value.toLowerCase() || "";
-    const groupFilter = groupFilterElement?.value.toLowerCase() || "";
-    const supplierFilter = supplierFilterElement?.value.toLowerCase() || "";
+    console.log("Filters:", { statusFilter, groupFilter, supplierFilter });
 
     // Get all order headers and rows
     const orderHeaders = document.querySelectorAll(".order-header");
 
     orderHeaders.forEach(header => {
+        // Get supplier value from the header
+        const supplierSpan = header.querySelector("#SupplierCode");
+        const supplier = supplierSpan ? supplierSpan.textContent.toUpperCase().trim() : ""; // Normalize to uppercase
+
         // Get rows under this header
         const rows = header.nextElementSibling.querySelectorAll("tbody tr");
 
         let hasVisibleRow = false; // Track if any row is visible
 
         rows.forEach(row => {
-            const status = row.children[2]?.textContent.toLowerCase() || "";
-            const group = row.children[0]?.textContent.toLowerCase() || "";
-            const supplier = header.querySelector("strong")?.textContent.toLowerCase() || "";
+            const status = row.children[2]?.textContent.toLowerCase().trim() || "";
+            const group = row.children[0]?.textContent.toLowerCase().trim() || "";
 
             // Apply filter logic
             const matchesStatus = !statusFilter || status === statusFilter;
@@ -366,6 +368,7 @@ function applyFilters() {
         }
     });
 }
+
 
 function clearFilters() {
     // Reset all filter inputs
