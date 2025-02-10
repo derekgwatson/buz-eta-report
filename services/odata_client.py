@@ -1,10 +1,10 @@
 from datetime import datetime
-from urllib.parse import urlencode, quote
 import os
 import requests
 from requests.auth import HTTPBasicAuth
 from dotenv import load_dotenv
 import logging
+
 
 class ODataClient:
     """
@@ -16,7 +16,7 @@ class ODataClient:
         password (str): The password for authentication.
     """
 
-    def __init__(self, source: str):
+    def __init__(self, source: str, http_client=None):
         """
         Initializes the ODataClient instance with the root URL and credentials.
 
@@ -43,6 +43,7 @@ class ODataClient:
 
         self.auth = HTTPBasicAuth(self.username, self.password)
         self.source = source
+        self.http_client = http_client or requests
 
     def get(self, endpoint: str, params: list) -> list:
         """
@@ -70,32 +71,12 @@ class ODataClient:
 
         try:
             # Send the GET request
-            response = requests.get(url, params=query_params, auth=self.auth)
+            response = self.http_client.get(url, params=query_params, auth=self.auth)
             response.raise_for_status()  # Raise an exception for HTTP errors
 
             # Process and reformat dates
-            formatted_data = []
-            response_json = response.json()
-            if "value" not in response_json:
-                logging.warning(f"No 'value' key in response from {url}.")
-                return formatted_data  # Return an empty list if 'value' is not present
-
-            for item in response_json["value"]:
-                item['Instance'] = self.source
-
-                # Ensure DateScheduled is present and valid
-                original_date = item.get("DateScheduled")
-                if original_date:
-                    try:
-                        parsed_date = datetime.strptime(original_date, "%Y-%m-%dT%H:%M:%SZ")
-                        item["DateScheduled"] = parsed_date.strftime("%d %b %Y")  # Format as "27 Nov 2024"
-                    except ValueError:
-                        logging.warning(f"Failed to parse date: {original_date}. Keeping original value.")
-                        pass  # Keep the original date if parsing fails
-
-                formatted_data.append(item)
-
-            return formatted_data
+            data = response.json()
+            return self._format_data(data.get("value", []))
 
         except requests.exceptions.RequestException as e:
             # Catch all request-related exceptions
@@ -106,3 +87,35 @@ class ODataClient:
             # Catch unexpected exceptions
             logging.error(f"An unexpected error occurred: {e}")
             raise  # Re-raise the exception to propagate it up
+
+    def _format_data(self, data: list) -> list:
+        """
+        Formats and processes the response data, updating all lines in an order to the latest DateScheduled.
+
+        Args:
+            data (list): Raw data from the OData service.
+
+        Returns:
+            list: Formatted data with updated DateScheduled for all lines.
+        """
+        # Step 1: Find the latest DateScheduled for each order
+        latest_dates = {}
+        for item in data:
+            order_id = item.get("RefNo")
+            date_scheduled = item.get("DateScheduled")
+            if order_id and date_scheduled:
+                parsed_date = datetime.strptime(date_scheduled, "%Y-%m-%dT%H:%M:%SZ")
+                if order_id not in latest_dates or parsed_date > latest_dates[order_id]:
+                    latest_dates[order_id] = parsed_date
+
+        # Step 2: Update each line's DateScheduled to the latest date for its order
+        formatted = []
+        for item in data:
+            order_id = item.get("RefNo")
+            latest_date = latest_dates.get(order_id)
+            if latest_date:
+                item["DateScheduled"] = latest_date.strftime("%d %b %Y")
+            item["Instance"] = self.source
+            formatted.append(item)
+
+        return formatted
