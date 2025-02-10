@@ -574,6 +574,87 @@ def robots_txt():
     return send_from_directory(app.static_folder, 'robots.txt')
 
 
+@app.route('/test_group_report/<obfuscated_id>')
+def eta_report_by_group(obfuscated_id):
+    from services.buz_data import get_open_orders_by_group
+
+    customer_group = obfuscated_id
+
+    if not customer_group:
+        error_message = f"No report found for ID: {obfuscated_id}"
+        return render_template('404.html', message=error_message), 404
+
+    try:
+        # Fetch data for both instances
+        combined_data = get_open_orders_by_group(get_db(), customer_group, "CBR")
+
+        # Group by RefNo
+        grouped_data = []
+        refno_to_date = {}
+
+        for item in combined_data:
+            ref_no = item.get("RefNo")
+            date_str = item.get("DateScheduled", "N/A")
+
+            if ref_no not in refno_to_date:
+                try:
+                    refno_to_date[ref_no] = datetime.strptime(date_str,
+                                                              "%d %b %Y") if date_str != "N/A" else datetime.min
+                except ValueError:
+                    refno_to_date[ref_no] = datetime.min  # Fallback for invalid date
+
+            # Add item to the group
+            group_entry = next((entry for entry in grouped_data if entry["RefNo"] == ref_no), None)
+            if not group_entry:
+                group_entry = {"RefNo": ref_no, "group_items": [], "DateScheduled": date_str}
+                grouped_data.append(group_entry)
+            group_entry["group_items"].append(item)
+
+            # Sort groups by DateScheduled
+        grouped_data.sort(key=lambda g: refno_to_date.get(g["RefNo"], datetime.min))
+
+        # Prepare customer name: handle the cases based on the conditions
+        customer_name = customer_group
+
+        def normalize_and_sort(values, case="title"):
+            """
+            Normalizes a list of strings: converts to lowercase, capitalizes the first letter of each word,
+            removes duplicates, and sorts them alphabetically.
+            """
+            if case == "upper":
+                return sorted({value.strip().upper() for value in values if value and value != "N/A"})
+            elif case == "lower":
+                return sorted({value.strip().lower() for value in values if value and value != "N/A"})
+            else:  # Default to title case
+                return sorted({value.strip().lower().title() for value in values if value and value != "N/A"})
+
+        # Compute unique filter options from combined data
+        unique_statuses = normalize_and_sort([item.get("ProductionStatus", "N/A") for item in combined_data])
+        unique_groups = normalize_and_sort([item.get("ProductionLine", "N/A") for item in combined_data])
+        unique_suppliers = normalize_and_sort([item.get("Instance", "N/A").upper() for item in combined_data],
+                                              case="upper")
+
+        # Pass the customer name along with the data to the template
+        if combined_data:
+            return render_template(
+                'report.html',
+                data=grouped_data,
+                customer_name=customer_name,
+                statuses=unique_statuses,
+                groups=unique_groups,
+                suppliers=unique_suppliers
+            )
+
+        return render_template('report.html', customer_name=customer_name)
+
+    except Exception as e:
+        if app.debug:
+            raise e
+        else:
+            error_message = f"Failed to generate report for ID: {obfuscated_id}. Error: {str(e)}"
+            return render_template('500.html', message=error_message), 500
+
+
 # Required Environment Variables
 REQUIRED_ENV_VARS = [
     "BUZ_DD_USERNAME", "BUZ_DD_PASSWORD",
@@ -590,4 +671,4 @@ if missing_vars:
 
 
 if __name__ == '__main__':
-    app.run()
+    app.run(debug=True)

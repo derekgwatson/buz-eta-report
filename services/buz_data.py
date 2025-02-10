@@ -23,17 +23,7 @@ def get_statuses(instance):
     return statuses
 
 
-def get_open_orders(conn, customer, instance):
-    # Base URL for SalesReport
-    odata_client = ODataClient(instance)
-
-    # Build the OData filter
-    filter_conditions = [
-        "OrderStatus eq 'Work in Progress'",
-        "ProductionStatus ne null",
-        f"Customer eq '{customer}'"  # Add Customer filter to OData
-    ]
-
+def fetch_and_process_orders(conn, odata_client, filter_conditions):
     # Fetch filtered SalesReport data
     sales_report_data = odata_client.get("JobsScheduleDetailed", filter_conditions)
 
@@ -53,10 +43,10 @@ def get_open_orders(conn, customer, instance):
     ''')
     status_mappings = dict(cursor.fetchall())  # odata_status as keys, custom_status as values
 
-    # Remove rows where the ProductionStatus is not in the active status mappings (odata_status keys)
+    # Remove rows where the ProductionStatus is not in the active status mappings
     _sales_report = _sales_report[_sales_report['ProductionStatus'].isin(status_mappings.keys())]
 
-    # Map ProductionStatus using the status mappings (odata_status to custom_status)
+    # Map ProductionStatus using the status mappings
     _sales_report['ProductionStatus'] = _sales_report['ProductionStatus'].map(
         lambda x: status_mappings.get(x, x)
     )
@@ -71,6 +61,59 @@ def get_open_orders(conn, customer, instance):
 
     # Convert the DataFrame to a list of dictionaries
     return _sales_report.to_dict(orient="records")
+
+
+def get_customers_by_group(customer_group, instance):
+    # Base URL for SalesReport
+    odata_client = ODataClient(instance)
+
+    # Build the OData filter
+    filter_conditions = [
+        "Order_Status eq 'Work in Progress'",
+        f"CustomerGroup eq '{customer_group}'"  # Add Customer filter to OData
+    ]
+
+    # Fetch filtered SalesReport data
+    customers = odata_client.get("SalesReport", filter_conditions)
+    print(f"Customers are: {customers}")
+    return customers
+
+
+def get_open_orders(conn, customer, instance):
+    # Base URL for SalesReport
+    odata_client = ODataClient(instance)
+
+    # Build the OData filter
+    filter_conditions = [
+        "OrderStatus eq 'Work in Progress'",
+        "ProductionStatus ne null",
+        f"Customer eq '{customer}'"  # Filter by single customer
+    ]
+
+    # Use the shared helper function
+    return fetch_and_process_orders(conn, odata_client, filter_conditions)
+
+
+def get_open_orders_by_group(conn, customer_group, instance):
+    # Base URL for SalesReport
+    odata_client = ODataClient(instance)
+
+    # Fetch all customers in the specified group
+    customers = get_customers_by_group(customer_group, instance)
+    if not customers:
+        print("No customers found for the specified group.")
+        return []
+
+    # Build the OData filter for all customers
+    customer_filter = " or ".join([f"Customer eq '{customer['Customer']}'" for customer in customers])
+    filter_conditions = [
+        "OrderStatus eq 'Work in Progress'",
+        "ProductionStatus ne null",
+        customer_filter  # Include all customers in the filter
+    ]
+
+    # Use the shared helper function
+    return fetch_and_process_orders(conn, odata_client, filter_conditions)
 
 
 def get_data_by_order_no(order_no, endpoint, instance):
