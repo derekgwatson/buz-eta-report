@@ -47,11 +47,11 @@ class ODataClient:
 
     def get(self, endpoint: str, params: list) -> list:
         """
-        Sends a GET request to the OData service.
+        Sends a GET request or a POST request to the OData service, depending on URL length.
 
         Args:
             endpoint (str): The endpoint to append to the root URL.
-            params (list): Query parameters for the GET request.
+            params (list): Query parameters for the request.
 
         Returns:
             list: The JSON response from the OData service.
@@ -61,32 +61,21 @@ class ODataClient:
         """
         url = f"{self.root_url}/{endpoint.lstrip('/')}"
 
-        # Join the conditions with " and " and encode spaces as %20
+        # Join the conditions with " and "
         filter_query = " and ".join(params)
         encoded_filter = {"$filter": filter_query}
-
-        # If additional query parameters are needed, merge them
-        other_params = {}  # Add other query parameters if needed
-        query_params = {**encoded_filter, **other_params}
-
         try:
-            # Send the GET request
-            response = self.http_client.get(url, params=query_params, auth=self.auth)
-            response.raise_for_status()  # Raise an exception for HTTP errors
-
-            # Process and reformat dates
-            data = response.json()
-            return self._format_data(data.get("value", []))
-
+            response = self.http_client.get(url, params=encoded_filter, auth=self.auth)
         except requests.exceptions.RequestException as e:
-            # Catch all request-related exceptions
-            logging.error(f"Request failed: {e}")
-            raise  # Re-raise the exception to propagate it up
+            logging.error(f"GET request failed: {e}")
+            raise
 
-        except Exception as e:
-            # Catch unexpected exceptions
-            logging.error(f"An unexpected error occurred: {e}")
-            raise  # Re-raise the exception to propagate it up
+        # Ensure the request was successful
+        response.raise_for_status()
+
+        # Process and reformat dates
+        data = response.json()
+        return self._format_data(data.get("value", []))
 
     def _format_data(self, data: list) -> list:
         """

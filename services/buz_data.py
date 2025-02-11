@@ -17,7 +17,6 @@ def get_statuses(instance):
     report_data = odata_client.get("JobsScheduleDetailed", filter_conditions)
 
     statuses = {item["ProductionStatus"] for item in report_data if "ProductionStatus" in item}
-    print(f"Statuses are: {statuses}")
     return statuses
 
 
@@ -73,7 +72,6 @@ def get_customers_by_group(customer_group, instance):
 
     # Fetch filtered SalesReport data
     customers = odata_client.get("SalesReport", filter_conditions)
-    print(f"Customers are: {customers}")
     return customers
 
 
@@ -99,19 +97,51 @@ def get_open_orders_by_group(conn, customer_group, instance):
     # Fetch all customers in the specified group
     customers = get_customers_by_group(customer_group, instance)
     if not customers:
-        print("No customers found for the specified group.")
+        print(f"No customers found for the specified group in {instance}.")
         return []
 
-    # Build the OData filter for all customers
-    customer_filter = " or ".join([f"Customer eq '{customer['Customer']}'" for customer in customers])
-    filter_conditions = [
-        "OrderStatus eq 'Work in Progress'",
-        "ProductionStatus ne null",
-        customer_filter  # Include all customers in the filter
-    ]
+    # Extract unique customer names
+    customer_names = sorted({customer['Customer'].strip() for customer in customers})
 
-    # Use the shared helper function
-    return fetch_and_process_orders(conn, odata_client, filter_conditions)
+    # Set a maximum URL length threshold
+    MAX_URL_LENGTH = 1000  # Adjust if needed
+
+    # Prepare batched queries
+    results = []
+    batch = []
+    query_base_length = len("OrderStatus eq 'Work in Progress' and ProductionStatus ne null and Customer in ()")
+
+    for name in customer_names:
+        formatted_name = f"'{name}'"  # Properly format names
+        test_batch = batch + [formatted_name]  # Simulate adding a new name
+
+        # Estimate the query length
+        estimated_length = query_base_length + len(", ".join(test_batch))
+        if estimated_length > MAX_URL_LENGTH:
+            # Send the current batch and reset it
+            customer_filter = f"Customer in ({', '.join(batch)})"
+            filter_conditions = [
+                "OrderStatus eq 'Work in Progress'",
+                "ProductionStatus ne null",
+                customer_filter
+            ]
+            print(f"filter_condition: {filter_conditions}")
+            results.extend(fetch_and_process_orders(conn, odata_client, filter_conditions))
+            batch = [formatted_name]  # Start a new batch
+        else:
+            batch.append(formatted_name)
+
+    # Send the last batch if it has data
+    if batch:
+        customer_filter = f"Customer in ({', '.join(batch)})"
+        filter_conditions = [
+            "OrderStatus eq 'Work in Progress'",
+            "ProductionStatus ne null",
+            customer_filter
+        ]
+        results.extend(fetch_and_process_orders(conn, odata_client, filter_conditions))
+
+    return results
 
 
 def get_data_by_order_no(order_no, endpoint, instance):

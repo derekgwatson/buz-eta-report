@@ -6,11 +6,18 @@
 <form method="post" id="customerForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h2>Edit Customer</h2>
+
     <label for="dd_name">DD Name:</label>
     <input type="text" id="dd_name" name="dd_name" value="{{ customer[1] }}">
 
     <label for="cbr_name">Cbr Name:</label>
     <input type="text" id="cbr_name" name="cbr_name" value="{{ customer[2] }}">
+
+    <label for="field_type">Field Type:</label>
+    <select id="field_type" name="field_type">
+        <option value="Customer Name" {% if customer[3] == "Customer Name" %}selected{% endif %}>Customer Name</option>
+        <option value="Customer Group" {% if customer[3] == "Customer Group" %}selected{% endif %}>Customer Group</option>
+    </select>
 
     <button type="submit">Save Changes</button>
 </form>

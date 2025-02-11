@@ -42,7 +42,8 @@ def create_db_tables(conn=None):
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             dd_name TEXT,
             cbr_name TEXT,
-            obfuscated_id TEXT NOT NULL UNIQUE
+            obfuscated_id TEXT NOT NULL UNIQUE,
+            field_type TEXT
         )
     ''', conn=conn)
 
