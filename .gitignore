@@ -20,3 +20,6 @@ run.bat
 
 # Other
 customers.db
+
+# Ignore everything in instance (runtime data)
+instance/

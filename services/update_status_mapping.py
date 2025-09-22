@@ -1,5 +1,7 @@
-from services.buz_data import get_statuses
 from services.database import execute_query
+from typing import Iterable
+from services.buz_data import get_statuses
+from services.odata_utils import odata_quote
 
 
 def update_status_mapping(odata_statuses):
@@ -80,30 +82,42 @@ def ensure_status_mapping_table(conn):
             print(f"Error populating `status_mapping`: {e}")
 
 
-def populate_status_mapping_table(conn):
+def _unique_nonempty(values: Iterable[str]) -> set[str]:
+    return {v.strip() for v in values if v and str(v).strip()}
+
+
+def populate_status_mapping_table(conn) -> None:
     """
     Pre-populate the `status_mapping` table with unique statuses from the OData feed.
-    Add new statuses and mark missing statuses as inactive.
+    - Adds any new statuses
+    - Marks missing statuses as inactive
     """
-    # Connect to the database
     cursor = conn.cursor()
 
-    # Fetch unique statuses for the instance
-    odata_statuses_cbr = get_statuses('CBR')
-    odata_statuses_dd = get_statuses('DD')
-    odata_statuses = odata_statuses_cbr | odata_statuses_dd
+    def _clean(values):
+        return {v.strip() for v in values if v and str(v).strip()}
 
-    # Mark all existing statuses as inactive initially
-    cursor.execute('UPDATE status_mapping SET active = FALSE')
+    # unpack .get("data")
+    cbr = _clean(get_statuses("CBR")["data"])
+    dd = _clean(get_statuses("DD")["data"])
+    odata_statuses = cbr | dd
 
-    # Add or update statuses
-    for status in odata_statuses:
-        if status:
-            cursor.execute('''
-            INSERT INTO status_mapping (odata_status, custom_status, active)
-            VALUES (?, ?, TRUE)
-            ON CONFLICT(odata_status) DO UPDATE SET active = TRUE;
-            ''', (status, status))
+    # Start a transaction
+    cursor.execute("BEGIN")
+
+    # Mark all existing statuses inactive first
+    cursor.execute("UPDATE status_mapping SET active = FALSE")
+
+    # Upsert each observed status; set custom_status default = odata_status on first insert
+    cursor.executemany(
+        """
+        INSERT INTO status_mapping (odata_status, custom_status, active)
+        VALUES (?, ?, TRUE)
+        ON CONFLICT(odata_status) DO UPDATE SET
+            active = TRUE
+        """,
+        [(s, s) for s in sorted(odata_statuses)],
+    )
 
     conn.commit()
 

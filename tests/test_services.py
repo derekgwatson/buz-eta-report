@@ -64,6 +64,21 @@ def test_odata_client_get_success(mock_http_client):
     assert result == expected
 
 
+def test_odata_quoting():
+    from services.odata_utils import odata_quote
+    assert odata_quote("O'Malley") == "'O''Malley'"
+
+    name = "O'Malley"
+    assert f"Customer eq {odata_quote(name)}" == "Customer eq 'O''Malley'"
+
+
+def test_odata_quoting_more():
+    from services.odata_utils import odata_quote
+    assert odata_quote("D'Angelo's") == "'D''Angelo''s'"
+    n = "D'Angelo's"
+    assert f"Customer eq {odata_quote(n)}" == "Customer eq 'D''Angelo''s'"
+
+
 def test_odata_client_get_failure(mock_http_client):
     # Set up mock response with HTTP error
     mock_http_client.set_mock_response(

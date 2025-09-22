@@ -2,10 +2,11 @@ import os
 from services.database import get_db, query_db, execute_query
 from werkzeug.exceptions import HTTPException
 from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, g, send_from_directory
+from flask import Flask, redirect, url_for, jsonify, flash, g, send_from_directory
+import requests  # outbound HTTP client + its exceptions
 from flask_login import current_user
 import secrets
-from services.buz_data import get_open_orders, get_open_orders_by_group
+from services.buz_data import get_open_orders, get_open_orders_by_group, get_data_by_order_no
 from authlib.integrations.flask_client import OAuth
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from datetime import timedelta
@@ -20,6 +21,15 @@ from sentry_sdk.integrations.flask import FlaskIntegration
 from services.database import create_db_tables
 from datetime import datetime
 
+from flask import send_file, render_template, request
+import io
+from services.export import (
+    fetch_report_rows_and_name, apply_filters, ordered_headers,
+    safe_base_filename, to_csv_bytes, to_excel_bytes
+)
+from typing import Tuple
+from services.migrations import run_migrations
+
 
 # Load environment variables from .env
 load_dotenv()
@@ -33,53 +43,102 @@ sentry_sdk.init(
     send_default_pii=True  # Enable personal identifiable information for better logs
 )
 
-# Initialize Flask app
-app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET")
 
-# Set app configurations
-app.permanent_session_lifetime = timedelta(minutes=30)
+def create_app():
+    # Initialize Flask app
+    _app = Flask(__name__, instance_relative_config=True)
 
-csrf = CSRFProtect(app)
+    db_env = os.getenv("DATABASE_PATH", "customers.db")  # just the filename is fine
+    if os.path.isabs(db_env):
+        db_path = db_env
+    else:
+        # anchor to the instance folder (recommended)
+        db_path = os.path.join(_app.instance_path, db_env)
 
-# Set up logging
-LOGGING_CONFIG = {
-    'version': 1,
-    'formatters': {
-        'default': {
-            'format': '[%(asctime)s] %(levelname)s in %(module)s: %(message)s',
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    _app.config["DATABASE"] = db_path
+    _app.logger.info(f"DB path: {_app.config['DATABASE']}")
+
+    env = os.getenv("APP_ENV").lower()
+    if env == "development":
+        from config import DevConfig as Cfg
+    elif env == "production":
+        from config import ProdConfig as Cfg
+    else:
+        # hard fail if the environment variable isn't set properly
+        raise "Unknown environment: " + env
+
+    _app.config.from_object(Cfg)
+
+    # Console logging that respects LOG_LEVEL
+    _configure_logging(_app)
+
+    _app.secret_key = os.getenv("FLASK_SECRET")
+
+    # Set app configurations
+    _app.permanent_session_lifetime = timedelta(minutes=30)
+
+    csrf = CSRFProtect(_app)
+
+    # Set up logging
+    logging_config = {
+        'version': 1,
+        'formatters': {
+            'default': {
+                'format': '[%(asctime)s] %(levelname)s in %(module)s: %(message)s',
+            },
         },
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'default',
+        'handlers': {
+            'console': {
+                'class': 'logging.StreamHandler',
+                'formatter': 'default',
+            },
         },
-    },
-    'root': {
-        'level': 'INFO',
-        'handlers': ['console'],
-    },
-}
+        'root': {
+            'level': 'INFO',
+            'handlers': ['console'],
+        },
+    }
 
-if os.getenv("ENV") == "production":
-    app.config['SESSION_COOKIE_SECURE'] = True  # Use HTTPS (enable in production)
-    app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to cookies
-    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Mitigate CSRF risks
-    app.config['REMEMBER_COOKIE_DURATION'] = timedelta(minutes=60)  # Session length
+    if os.getenv("ENV") == "production":
+        _app.config['SESSION_COOKIE_SECURE'] = True  # Use HTTPS (enable in production)
+        _app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to cookies
+        _app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Mitigate CSRF risks
+        _app.config['REMEMBER_COOKIE_DURATION'] = timedelta(minutes=60)  # Session length
+
+    logging.config.dictConfig(logging_config)
+
+    # Initialize OAuth and LoginManager
+    _login_manager = LoginManager()
+    _login_manager.init_app(_app)
+    _login_manager.login_view = "login" # Set the default login view
+
+    # Customize messages (optional)
+    _login_manager.login_message = "Please log in to access this page."
+    _login_manager.login_message_category = "error"
+
+    with _app.app_context():
+        conn = get_db()
+        run_migrations(conn, make_backup=True, logger=_app.logger)
+
+    return _app, _login_manager
 
 
-logging.config.dictConfig(LOGGING_CONFIG)
+def _configure_logging(app):
+    root = logging.getLogger()
+    root.handlers[:] = []  # reset
+    root.setLevel(app.config["LOG_LEVEL"])
+    h = logging.StreamHandler()
+    h.setLevel(app.config["LOG_LEVEL"])
+    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    h.setFormatter(logging.Formatter(fmt))
+    root.addHandler(h)
+    # make Flask’s own logger match
+    app.logger.setLevel(app.config["LOG_LEVEL"])
 
-# Initialize OAuth and LoginManager
+
+app, login_manager = create_app()
 oauth = OAuth(app)
-login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = "login" # Set the default login view
-
-# Customize messages (optional)
-login_manager.login_message = "Please log in to access this page."
-login_manager.login_message_category = "error"
 
 
 # Close the database connection when the app context is destroyed
@@ -195,6 +254,19 @@ def home():
 @login_required
 @role_required('admin', 'user')  # Allow both roles
 def admin():
+    def _debug_db_snapshot():
+        conn = get_db()
+        dbs = conn.execute("PRAGMA database_list").fetchall()
+        cust_count = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+        cols = conn.execute("PRAGMA table_info(customers)").fetchall()
+        return {
+            "attached_dbs": dbs,  # includes absolute path to the file
+            "customers_count": cust_count,  # prove there ARE rows
+            "customers_columns": [c[1] for c in cols],  # prove expected columns exist
+        }
+
+    print(_debug_db_snapshot())
+
     if request.method == 'POST':
         dd_name = request.form['dd_name']
         cbr_name = request.form['cbr_name']
@@ -211,12 +283,21 @@ def admin():
         return redirect(url_for('admin'))
 
     # Retrieve all customers from the database
-    customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id, field_type FROM customers")
-    # Sort using the combined name logic
-    sorted_customers = sorted(
-        customers,
-        key=lambda c: (c[1] or c[2] or "").lower()
-    )
+    customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id, field_type FROM customers", one=False)
+
+    # If you ever get tuples (no row_factory), you can still sort:
+    try:
+        sorted_customers = sorted(
+            customers,
+            key=lambda c: ((c["dd_name"] or c["cbr_name"] or "").lower())
+        )
+    except (TypeError, KeyError):
+        # fallback for tuple rows
+        sorted_customers = sorted(
+            customers,
+            key=lambda c: ((c[1] or c[2] or "").lower())
+        )
+
     if customers:
         return render_template('admin.html', customers=sorted_customers)
     return render_template('admin.html')
@@ -228,32 +309,55 @@ def eta_report_redirect(code):
     return redirect(url_for('eta_report', obfuscated_id=code), code=301)
 
 
+def _unwrap_result(result) -> Tuple[list, str]:
+    """
+    Accept either:
+      - {"data": [...], "source": "live|cache|cache-503|cache-timeout|cache-error"}
+      - [...]  (plain list, treated as live)
+    and return (rows, source).
+    """
+    if isinstance(result, dict) and "data" in result:
+        return result.get("data") or [], result.get("source", "live")
+    return (result or []), "live"
+
+
+def _pick_overall_source(*sources: str) -> str:
+    """
+    If any non-live source is present, surface the most informative one.
+    Priority: cache-503 > cache-timeout > cache-error > cache > live
+    """
+    priority = ["cache-503", "cache-timeout", "cache-error", "cache", "live"]
+    for label in priority:
+        if label in sources:
+            return label
+    return "live"  # fallback
+
+
 @app.route('/<obfuscated_id>')
 def eta_report(obfuscated_id):
     customer = query_db("SELECT dd_name, cbr_name, field_type FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
 
     if not customer:
-        error_message = f"No report found for ID: {obfuscated_id}"
-        return render_template('404.html', message=error_message), 404
+        return render_template('404.html', message=f"No report found for ID: {obfuscated_id}"), 404
 
     try:
         if customer[2] == 'Customer Group':
-            # Fetch data for both instances, ensuring customer fields are not empty
-            data_dd = get_open_orders_by_group(get_db(), customer[0], "DD") if customer[0] else []
-            data_cbr = get_open_orders_by_group(get_db(), customer[1], "CBR") if customer[1] else []
+            res_dd  = get_open_orders_by_group(get_db(), customer[0], "DD")  if customer[0] else []
+            res_cbr = get_open_orders_by_group(get_db(), customer[1], "CBR") if customer[1] else []
         else:
-            # Fetch data for both instances, ensuring customer fields are not empty
-            data_dd = get_open_orders(get_db(), customer[0], "DD") if customer[0] else []
-            data_cbr = get_open_orders(get_db(), customer[1], "CBR") if customer[1] else []
+            res_dd  = get_open_orders(get_db(), customer[0], "DD")  if customer[0] else []
+            res_cbr = get_open_orders(get_db(), customer[1], "CBR") if customer[1] else []
 
-        # Combine the results
-        combined_data = data_cbr + data_dd
+        rows_dd,  src_dd  = _unwrap_result(res_dd)
+        rows_cbr, src_cbr = _unwrap_result(res_cbr)
 
-        # Group by RefNo
+        combined_rows = rows_cbr + rows_dd
+
+        # Group by RefNo (unchanged logic, just use combined_rows)
         grouped_data = []
         refno_to_date = {}
 
-        for item in combined_data:
+        for item in combined_rows:
             ref_no = item.get("RefNo")
             date_str = item.get("DateScheduled", "N/A")
 
@@ -295,27 +399,32 @@ def eta_report(obfuscated_id):
                 return sorted({value.strip().lower().title() for value in values if value and value != "N/A"})
 
         # Compute unique filter options from combined data
-        unique_statuses = normalize_and_sort([item.get("ProductionStatus", "N/A") for item in combined_data])
-        unique_groups = normalize_and_sort([item.get("ProductionLine", "N/A") for item in combined_data])
-        unique_suppliers = normalize_and_sort([item.get("Instance", "N/A").upper() for item in combined_data],
+        unique_statuses = normalize_and_sort([item.get("ProductionStatus", "N/A") for item in combined_rows])
+        unique_groups = normalize_and_sort([item.get("ProductionLine", "N/A") for item in combined_rows])
+        unique_suppliers = normalize_and_sort([item.get("Instance", "N/A").upper() for item in combined_rows],
                                               case="upper")
 
+        overall_source = _pick_overall_source(src_dd, src_cbr)
+        is_cached = overall_source != "live"
+
         # Pass the customer name along with the data to the template
-        if combined_data:
+        if combined_rows:
             return render_template(
                 'report.html',
                 data=grouped_data,
                 customer_name=customer_name,
                 statuses=unique_statuses,
                 groups=unique_groups,
-                suppliers=unique_suppliers
+                suppliers=unique_suppliers,
+                source=overall_source,  # ← fixed
+                is_cached=is_cached,
             )
 
         return render_template('report.html', customer_name=customer_name)
 
     except Exception as e:
         if app.debug:
-            raise e
+            raise
         else:
             error_message = f"Failed to generate report for ID: {obfuscated_id}. Error: {str(e)}"
             return render_template('500.html', message=error_message), 500
@@ -355,39 +464,44 @@ def edit_customer(customer_id):
     return render_template('edit.html', customer=customer)
 
 
-@app.route('/jobs-schedule/<order_no>', methods=['GET'])
+@app.route('/jobs-schedule/<instance>/<order_no>', methods=['GET'])
 @login_required
-def jobs_schedule(order_no):
-    """Route to fetch JobsScheduleDetails for a given order number."""
+def jobs_schedule(instance: str, order_no: str):
+    instance = (instance or "").upper()
+    if instance not in {"DD", "CBR"}:
+        return jsonify({"error": "Invalid instance. Use 'DD' or 'CBR'."}), 400
+
     try:
-        # Call the function to get the data
-        data = get_data_by_order_no(order_no, "JobsScheduleDetailed", "DD")
-        return jsonify(data)
-
+        result = get_data_by_order_no(order_no, "JobsScheduleDetailed", instance)
+        return jsonify(result)
     except requests.exceptions.RequestException as e:
-        # Handle the error based on the environment
         if app.debug:
-            # In non-production environments, raise the exception for debugging
-            raise e
-        else:
-            return jsonify({"error": f"Failed to fetch JobsScheduleDetails: {str(e)}"}), 500
+            raise
+        return jsonify({"error": f"Failed to fetch JobsScheduleDetailed: {e}"}), 500
+    except RuntimeError as e:
+        return jsonify({"error": str(e)}), 503
 
 
-@app.route('/wip/<order_no>', methods=['GET'])
+# /wip/<instance>/<order_no>
+@app.route('/wip/<instance>/<order_no>', methods=['GET'])
 @login_required
-def work_in_progress(order_no):
-    """Route to fetch WorkInProgress for a given order number."""
-    try:
-        data = get_data_by_order_no(order_no, "WorkInProgress")
-        return jsonify(data)
+def work_in_progress(instance: str, order_no: str):
+    """Fetch WorkInProgress rows for a given order number and instance."""
+    instance = (instance or "").upper()
+    if instance not in {"DD", "CBR"}:
+        return jsonify({"error": "Invalid instance. Use 'DD' or 'CBR'."}), 400
 
+    try:
+        result = get_data_by_order_no(order_no, "WorkInProgress", instance)
+        # result is {"data": [...], "source": "live|cache|..."}
+        return jsonify(result)
     except requests.exceptions.RequestException as e:
-        # Handle the error based on the environment
         if app.debug:
-            # In non-production environments, raise the exception for debugging
-            raise e
-        else:
-            return jsonify({"error": f"Failed to fetch WorkInProgress: {str(e)}"}), 500
+            raise
+        return jsonify({"error": f"Failed to fetch WorkInProgress: {e}"}), 500
+    except RuntimeError as e:
+        # e.g. blackout with no cache yet
+        return jsonify({"error": str(e)}), 503
 
 
 @app.route('/status_mapping')
@@ -578,6 +692,67 @@ def favicon():
 @app.route('/robots.txt')
 def robots_txt():
     return send_from_directory(app.static_folder, 'robots.txt')
+
+
+def _group_data_only(conn, group, instance):
+    res = get_open_orders_by_group(conn, group, instance)
+    return res["data"] if isinstance(res, dict) else (res or [])
+
+
+@app.route("/<obfuscated_id>/download.csv")
+def download_csv(obfuscated_id):
+    rows, customer_name = fetch_report_rows_and_name(
+        obfuscated_id,
+        query_db=query_db,
+        get_db=get_db,
+        get_open_orders=get_open_orders,
+        get_open_orders_by_group=get_open_orders_by_group,
+    )
+    if rows is None:
+        return render_template("404.html", message="Report not found"), 404
+
+    rows = apply_filters(
+        rows,
+        status   = request.args.get("status")   or request.args.get("statusFilter"),
+        group    = request.args.get("group")    or request.args.get("groupFilter"),
+        supplier = request.args.get("supplier") or request.args.get("supplierFilter"),
+    )
+    headers = ordered_headers(rows)
+    data = to_csv_bytes(rows, headers)
+    return send_file(
+        io.BytesIO(data),
+        mimetype="text/csv",
+        as_attachment=True,
+        download_name=safe_base_filename(customer_name or obfuscated_id) + ".csv",
+    )
+
+
+@app.route("/<obfuscated_id>/download.xlsx")
+def download_xlsx(obfuscated_id):
+    rows, customer_name = fetch_report_rows_and_name(
+        obfuscated_id,
+        query_db=query_db,
+        get_db=get_db,
+        get_open_orders=get_open_orders,
+        get_open_orders_by_group=get_open_orders_by_group,
+    )
+    if rows is None:
+        return render_template("404.html", message="Report not found"), 404
+
+    rows = apply_filters(
+        rows,
+        status   = request.args.get("status")   or request.args.get("statusFilter"),
+        group    = request.args.get("group")    or request.args.get("groupFilter"),
+        supplier = request.args.get("supplier") or request.args.get("supplierFilter"),
+    )
+    headers = ordered_headers(rows)
+    data = to_excel_bytes(rows, headers)
+    return send_file(
+        io.BytesIO(data),
+        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        as_attachment=True,
+        download_name=safe_base_filename(customer_name or obfuscated_id) + ".xlsx",
+    )
 
 
 # Required Environment Variables
