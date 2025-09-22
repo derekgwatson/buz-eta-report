@@ -1,7 +1,6 @@
 import os
-from services.database import get_db, query_db, execute_query
+from services.database import execute_query
 from werkzeug.exceptions import HTTPException
-from dotenv import load_dotenv
 from flask import Flask, redirect, url_for, jsonify, flash, g, send_from_directory
 import requests  # outbound HTTP client + its exceptions
 from flask_login import current_user
@@ -33,19 +32,11 @@ import click
 from services.database import get_db, query_db
 from services.buz_data import get_open_orders, get_open_orders_by_group
 from services.cache import get_cache
+from dotenv import load_dotenv, find_dotenv
 
 
 # Load environment variables from .env
-load_dotenv()
-
-# Initialize Sentry
-sentry_sdk.init(
-    dsn=os.getenv("SENTRY_DSN"),  # Replace this with your DSN URL or use an environment variable
-    integrations=[FlaskIntegration()],
-    traces_sample_rate=1.0,  # Adjust sampling rate if needed
-    environment=os.getenv("FLASK_ENV", "development"),  # Set to "production" in production
-    send_default_pii=True  # Enable personal identifiable information for better logs
-)
+load_dotenv(find_dotenv())
 
 
 def create_app():
@@ -63,16 +54,17 @@ def create_app():
     _app.config["DATABASE"] = db_path
     _app.logger.info(f"DB path: {_app.config['DATABASE']}")
 
-    env = os.getenv("APP_ENV").lower()
-    if env == "development":
+    ENV = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "production").lower()
+
+    if ENV == "development":
         from config import DevConfig as Cfg
-    elif env == "production":
+    elif ENV == "production":
         from config import ProdConfig as Cfg
     else:
-        # hard fail if the environment variable isn't set properly
-        raise "Unknown environment: " + env
+        raise RuntimeError(f"Unknown APP_ENV/FLASK_ENV value: {ENV!r}. Set APP_ENV=production or development.")
 
     _app.config.from_object(Cfg)
+    _app.logger.info("APP_ENV resolved to %s", ENV)
 
     # Console logging that respects LOG_LEVEL
     _configure_logging(_app)
@@ -125,7 +117,7 @@ def create_app():
         conn = get_db()
         run_migrations(conn, make_backup=True, logger=_app.logger)
 
-    return _app, _login_manager
+    return _app, _login_manager, ENV
 
 
 def _configure_logging(app):
@@ -141,7 +133,17 @@ def _configure_logging(app):
     app.logger.setLevel(app.config["LOG_LEVEL"])
 
 
-app, login_manager = create_app()
+app, login_manager, ENV = create_app()
+
+# Initialize Sentry
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    integrations=[FlaskIntegration()],
+    traces_sample_rate=1.0,  # Adjust sampling rate if needed
+    environment=ENV,
+    send_default_pii=True  # Enable personal identifiable information for better logs
+)
+
 oauth = OAuth(app)
 
 
@@ -705,14 +707,19 @@ def _group_data_only(conn, group, instance):
     return res["data"] if isinstance(res, dict) else (res or [])
 
 
+def _customer_data_only(conn, customer, instance):
+    res = get_open_orders(conn, customer, instance)
+    return res["data"] if isinstance(res, dict) else (res or [])
+
+
 @app.route("/<obfuscated_id>/download.<fmt>")
 def download_orders(obfuscated_id, fmt):
     rows, customer_name = fetch_report_rows_and_name(
         obfuscated_id,
         query_db=query_db,
         get_db=get_db,
-        get_open_orders=get_open_orders,
-        get_open_orders_by_group=get_open_orders_by_group,
+        get_open_orders=_customer_data_only,
+        get_open_orders_by_group=_group_data_only,
     )
     if rows is None:
         return render_template("404.html", message="Report not found"), 404
