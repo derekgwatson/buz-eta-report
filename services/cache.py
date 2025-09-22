@@ -9,18 +9,18 @@ from typing import Any, Optional
 from flask import g
 from zoneinfo import ZoneInfo
 
-from services.database import execute_query, query_db
+from services.database import execute_query, query_db, get_db
 
 SYD = ZoneInfo("Australia/Sydney")
 
 
-def ensure_cache_table(db=None) -> None:
+def ensure_cache_table(conn=None) -> None:
     """
     Create a generic key/value cache table if it doesn't exist.
     Rows are versioned by updated_at so we can age them out or refresh.
     """
-    if db is None:
-        db = g.db
+    if conn is None:
+        conn = get_db()
     execute_query(
         """
         CREATE TABLE IF NOT EXISTS cache (
@@ -30,7 +30,7 @@ def ensure_cache_table(db=None) -> None:
             meta_json      TEXT
         )
         """,
-        db=db,
+        conn=conn,
     )
 
 
@@ -42,14 +42,14 @@ class CacheEntry:
     meta: dict
 
 
-def get_cache(key: str, db=None) -> Optional[CacheEntry]:
-    if db is None:
-        db = g.db
+def get_cache(key: str, conn=None) -> Optional[CacheEntry]:
+    if conn is None:
+        conn = get_db()
     row = query_db(
         "SELECT cache_key, payload_json, updated_at_utc, meta_json FROM cache WHERE cache_key = ?",
         (key,),
         one=True,
-        db=db,
+        conn=conn,
     )
     if not row:
         return None
@@ -61,10 +61,10 @@ def get_cache(key: str, db=None) -> Optional[CacheEntry]:
     )
 
 
-def set_cache(key: str, payload: Any, meta: Optional[dict] = None, db=None) -> None:
-    if db is None:
-        db = g.db
-    ensure_cache_table(db)
+def set_cache(key: str, payload: Any, meta: Optional[dict] = None, conn=None) -> None:
+    if conn is None:
+        conn = get_db()
+    ensure_cache_table(conn)
     now_utc = datetime.now(timezone.utc).isoformat(timespec="seconds")
     execute_query(
         """
@@ -81,7 +81,7 @@ def set_cache(key: str, payload: Any, meta: Optional[dict] = None, db=None) -> N
             now_utc,
             json.dumps(meta or {}, ensure_ascii=False),
         ),
-        db=db,
+        conn=conn,
     )
 
 

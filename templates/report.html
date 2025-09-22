@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sales Report</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -126,21 +127,61 @@
             color: #e74c3c;
         }
 
+    </style>
 
+    <style>
+        /* styling for the download links */
 
+        /* Make the export button a “ghost” until hovered */
+        .page-actions .btn-default {
+          background: transparent;
+          border-color: transparent;
+          color: #777;
+        }
+        .page-actions .btn-default:hover,
+        .page-actions .open .btn-default {
+          background: #f7f7f7;
+          border-color: #ccc;
+          color: #333;
+        }
+        .page-header { margin-top: 10px; margin-bottom: 15px; }
     </style>
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
 </head>
 <body>
-    <div class="header">
-        <h1>Open Orders for {{ customer_name }}</h1>
-        <img src="{{ url_for('static', filename='watson_logo.png') }}" alt="Watson Logo" class="logo">
+<div class="header">
+  <h1>Open Orders for {{ customer_name }}</h1>
+
+{% if source != "live" %}
+  <div class="alert alert-warning py-2 my-2">
+    Showing cached data ({{ source }}).
+    {% if last_dd %}DD last refreshed: {{ last_dd }}. {% endif %}
+    {% if last_cbr %}CBR last refreshed: {{ last_cbr }}.{% endif %}
+  </div>
+{% else %}
+  <div class="alert alert-success py-2 my-2">
+    Live data.
+  </div>
+{% endif %}
+
+  <div class="header-rail">
+    <div class="btn-group btn-group-sm export-group">
+      <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="Export current view">
+        <span class="glyphicon glyphicon-download-alt"></span>
+        <span class="hidden-xs"> Export</span> <span class="caret"></span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-right">
+        <li class="dropdown-header">Download</li>
+        <li><a id="downloadCsv"  href="{{ csv_url }}" data-base="{{ csv_url }}"><span class="glyphicon glyphicon-file"></span> CSV (.csv)</a></li>
+        <li><a id="downloadXlsx" href="{{ xlsx_url }}" data-base="{{ xlsx_url }}"><span class="glyphicon glyphicon-list-alt"></span> Excel (.xlsx)</a></li>
+      </ul>
     </div>
 
-    <div style="margin-left:auto; display:flex; gap:8px; align-items:center;">
-      <a id="downloadCsv" class="btn" href="/{{ obfuscated_id }}/download.csv">Download CSV</a>
-      <a id="downloadXlsx" class="btn" href="/{{ obfuscated_id }}/download.xlsx">Download Excel</a>
-    </div>
+    <button class="btn btn-success btn-sm" onclick="toggleSidebar()">Toggle Sidebar</button>
+    <img src="{{ url_for('static', filename='watson_logo.png') }}" class="logo" alt="Watson Logo">
+  </div>
+</div>
+
 
     <!-- Filter Section -->
  <div id="filters">
@@ -172,10 +213,6 @@
         <button type="button" onclick="clearFilters()">Clear Filters</button>
     </form>
 </div>
-
-
-<!-- Toggle Button -->
-<button class="toggle-sidebar" onclick="toggleSidebar()">Toggle Sidebar</button>
 
 <div class="container" id="container">
     <!-- Main Content -->
@@ -380,30 +417,43 @@
         // Reapply filters with cleared inputs
         applyFilters();
     }
+</script>
 
+<script>
     function updateDownloadLinks() {
-      const params = new URLSearchParams();
-      const s = document.getElementById("statusFilter")?.value;
-      const g = document.getElementById("groupFilter")?.value;
-      const sup = document.getElementById("supplierFilter")?.value;
+      var csv  = document.getElementById("downloadCsv");
+      var xlsx = document.getElementById("downloadXlsx");
+      if (!csv || !xlsx) return;
 
-      if (s) params.set('status', s);
-      if (g) params.set('group', g);
-      if (sup) params.set('supplier', sup);
+      // use the server-rendered bases (no hard-coded /{{ obfuscated_id }}/…)
+      var baseCsv  = csv.getAttribute("data-base")  || csv.href.split("?")[0];
+      var baseXlsx = xlsx.getAttribute("data-base") || xlsx.href.split("?")[0];
 
-      const qs = params.toString();
-      const baseCsv = "/{{ obfuscated_id }}/download.csv";
-      const baseXlsx = "/{{ obfuscated_id }}/download.xlsx";
-      document.getElementById("downloadCsv").href = qs ? `${baseCsv}?${qs}` : baseCsv;
-      document.getElementById("downloadXlsx").href = qs ? `${baseXlsx}?${qs}` : baseXlsx;
+      var params = new URLSearchParams();
+      var s = document.getElementById("statusFilter")?.value;
+      var g = document.getElementById("groupFilter")?.value;
+      var sup = document.getElementById("supplierFilter")?.value;
+
+      if (s)   params.set("status", s);
+      if (g)   params.set("group", g);
+      if (sup) params.set("supplier", sup);
+
+      params.set("view", "onscreen");
+
+      var qs = params.toString();
+      csv.href  = qs ? baseCsv  + "?" + qs : baseCsv;
+      xlsx.href = qs ? baseXlsx + "?" + qs : baseXlsx;
     }
 
-    ["statusFilter", "groupFilter", "supplierFilter"].forEach(id => {
-      const el = document.getElementById(id);
+    ["statusFilter","groupFilter","supplierFilter"].forEach(function(id){
+      var el = document.getElementById(id);
       if (el) el.addEventListener("change", updateDownloadLinks);
     });
     window.addEventListener("load", updateDownloadLinks);
+
 </script>
 
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
 </body>
 </html>

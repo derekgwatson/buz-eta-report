@@ -6,7 +6,7 @@ from flask import Flask, redirect, url_for, jsonify, flash, g, send_from_directo
 import requests  # outbound HTTP client + its exceptions
 from flask_login import current_user
 import secrets
-from services.buz_data import get_open_orders, get_open_orders_by_group, get_data_by_order_no
+from services.buz_data import get_data_by_order_no
 from authlib.integrations.flask_client import OAuth
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from datetime import timedelta
@@ -29,6 +29,10 @@ from services.export import (
 )
 from typing import Tuple
 from services.migrations import run_migrations
+import click
+from services.database import get_db, query_db
+from services.buz_data import get_open_orders, get_open_orders_by_group
+from services.cache import get_cache
 
 
 # Load environment variables from .env
@@ -326,7 +330,7 @@ def _pick_overall_source(*sources: str) -> str:
     If any non-live source is present, surface the most informative one.
     Priority: cache-503 > cache-timeout > cache-error > cache > live
     """
-    priority = ["cache-503", "cache-timeout", "cache-error", "cache", "live"]
+    priority = ["cache-503-sim", "cache-503", "cache-timeout", "cache-error", "cache", "live"]
     for label in priority:
         if label in sources:
             return label
@@ -416,8 +420,10 @@ def eta_report(obfuscated_id):
                 statuses=unique_statuses,
                 groups=unique_groups,
                 suppliers=unique_suppliers,
-                source=overall_source,  # ← fixed
+                source=overall_source,
                 is_cached=is_cached,
+                csv_url=url_for('download_orders', obfuscated_id=obfuscated_id, fmt='csv'),
+                xlsx_url=url_for('download_orders', obfuscated_id=obfuscated_id, fmt='xlsx'),
             )
 
         return render_template('report.html', customer_name=customer_name)
@@ -699,8 +705,8 @@ def _group_data_only(conn, group, instance):
     return res["data"] if isinstance(res, dict) else (res or [])
 
 
-@app.route("/<obfuscated_id>/download.csv")
-def download_csv(obfuscated_id):
+@app.route("/<obfuscated_id>/download.<fmt>")
+def download_orders(obfuscated_id, fmt):
     rows, customer_name = fetch_report_rows_and_name(
         obfuscated_id,
         query_db=query_db,
@@ -718,41 +724,62 @@ def download_csv(obfuscated_id):
         supplier = request.args.get("supplier") or request.args.get("supplierFilter"),
     )
     headers = ordered_headers(rows)
-    data = to_csv_bytes(rows, headers)
+
+    if fmt == "xlsx":
+        data = to_excel_bytes(rows, headers)
+        mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+
+    elif fmt == "csv":
+        data = to_csv_bytes(rows, headers)
+        mimetype = "text/csv"
+
+    else:
+        raise "Unrecognised format: " + fmt
+
     return send_file(
         io.BytesIO(data),
-        mimetype="text/csv",
+        mimetype=mimetype,
         as_attachment=True,
-        download_name=safe_base_filename(customer_name or obfuscated_id) + ".csv",
+        download_name=safe_base_filename(customer_name or obfuscated_id) + "." + fmt,
     )
 
 
-@app.route("/<obfuscated_id>/download.xlsx")
-def download_xlsx(obfuscated_id):
-    rows, customer_name = fetch_report_rows_and_name(
-        obfuscated_id,
-        query_db=query_db,
-        get_db=get_db,
-        get_open_orders=get_open_orders,
-        get_open_orders_by_group=get_open_orders_by_group,
-    )
-    if rows is None:
-        return render_template("404.html", message="Report not found"), 404
+@app.cli.command("prewarm-cache")
+@click.option("--instance", "instances", multiple=True, default=["DD","CBR"], help="Instances to warm")
+def prewarm_cache(instances):
+    """
+    Warm cache for all configured customers/groups.
+    Safe to run anytime; best a few minutes before blackout.
+    """
+    conn = get_db()
+    customers = query_db("SELECT dd_name, cbr_name, field_type FROM customers", one=False)
+    total = 0
+    for row in customers or []:
+        dd, cbr, ftype = row[0], row[1], row[2]
+        for inst in instances:
+            name = dd if inst == "DD" else cbr
+            if not name:
+                continue
+            if ftype == "Customer Group":
+                res = get_open_orders_by_group(conn, name, inst)
+            else:
+                res = get_open_orders(conn, name, inst)
+            data = res["data"] if isinstance(res, dict) else (res or [])
+            click.echo(f"[{inst}] {ftype}: {name} → warmed {len(data)} rows (source={res.get('source','live') if isinstance(res,dict) else 'live'})")
+            total += 1
+    click.echo(f"Done. Warmed {total} entries.")
 
-    rows = apply_filters(
-        rows,
-        status   = request.args.get("status")   or request.args.get("statusFilter"),
-        group    = request.args.get("group")    or request.args.get("groupFilter"),
-        supplier = request.args.get("supplier") or request.args.get("supplierFilter"),
-    )
-    headers = ordered_headers(rows)
-    data = to_excel_bytes(rows, headers)
-    return send_file(
-        io.BytesIO(data),
-        mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        as_attachment=True,
-        download_name=safe_base_filename(customer_name or obfuscated_id) + ".xlsx",
-    )
+
+def _cache_last_refresh_for_group(group: str, instance: str) -> str | None:
+    key = f"open_orders_by_group:{instance}:{group}"
+    entry = get_cache(key)
+    return (entry.meta or {}).get("refreshed_at_syd") if entry else None
+
+
+def _cache_last_refresh_for_customer(customer: str, instance: str) -> str | None:
+    key = f"open_orders:{instance}:customer:{customer}"  # use the exact key format you chose for single-customer
+    entry = get_cache(key)
+    return (entry.meta or {}).get("refreshed_at_syd") if entry else None
 
 
 # Required Environment Variables

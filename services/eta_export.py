@@ -1,4 +1,5 @@
 # services/eta_export.py
+
 from typing import List, Dict, Iterable, Tuple, Callable, Optional
 import io, csv, re
 from datetime import datetime
@@ -11,6 +12,9 @@ PREFERRED_COLS = [
     "RefNo", "DateScheduled", "ProductionStatus", "ProductionLine",
     "InventoryItem", "Descn", "Instance", "FixedLine"
 ]
+
+# --- NEW: headers for exactly what the table shows ---
+DISPLAY_HEADERS = ["Group", "Item", "Status"]
 
 
 def ordered_headers(rows: Iterable[Dict]) -> List[str]:
@@ -31,12 +35,28 @@ def apply_filters(rows: Iterable[Dict], *, status: str = "", group: str = "", su
     sup = (supplier or "").strip().upper()
 
     def ok(r: Dict) -> bool:
-        if s and (str(r.get("ProductionStatus","")).strip().lower() != s): return False
-        if g and (str(r.get("ProductionLine","")).strip().lower() != g): return False
-        if sup and (str(r.get("Instance","")).strip().upper() != sup): return False
+        if s and (str(r.get("ProductionStatus", "")).strip().lower() != s):
+            return False
+        if g and (str(r.get("ProductionLine", "")).strip().lower() != g):
+            return False
+        if sup and (str(r.get("Instance", "")).strip().upper() != sup):
+            return False
         return True
 
     return [r for r in rows if ok(r)]
+
+
+# --- NEW: turn full rows into the exact 3 columns you render in the table ---
+def map_rows_to_display(rows: Iterable[Dict]) -> Tuple[List[Dict], List[str]]:
+    out: List[Dict] = []
+    for r in rows:
+        group = (r.get("ProductionLine") or "").strip()
+        inv   = (r.get("InventoryItem") or "").strip()
+        fixed = (r.get("FixedLine") or "").strip()
+        item  = f"{inv} ({fixed})" if fixed else inv
+        status = (r.get("ProductionStatus") or "").strip()
+        out.append({"Group": group, "Item": item, "Status": status})
+    return out, DISPLAY_HEADERS
 
 
 def safe_base_filename(name_or_id: str, tz: str = "Australia/Sydney") -> str:
@@ -89,11 +109,9 @@ def fetch_report_rows_and_name(
     get_open_orders: Callable,
     get_open_orders_by_group: Callable
 ) -> Tuple[Optional[List[Dict]], Optional[str]]:
-    """Pure function wrapper around your existing data access."""
     customer = query_db(
         "SELECT dd_name, cbr_name, field_type FROM customers WHERE obfuscated_id = ?",
-        (obfuscated_id,),
-        one=True
+        (obfuscated_id,), one=True
     )
     if not customer:
         return None, None

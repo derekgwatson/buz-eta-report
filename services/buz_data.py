@@ -98,19 +98,34 @@ def get_customers_by_group(customer_group: str, instance: str) -> list[dict]:
     return odata_client.get("SalesReport", filter_conditions) or []
 
 
-def get_open_orders(conn, customer, instance):
-    # Base URL for SalesReport
+def get_open_orders(conn, customer: str, instance: str) -> dict:
+    """
+    Live-first; on 503/timeout/conn error, serve cached.
+    Returns {"data": list[dict], "source": "..."} like the group version.
+    """
     odata_client = ODataClient(instance)
 
-    # Build the OData filter
-    filter_conditions = [
-        "OrderStatus eq 'Work in Progress'",
-        "ProductionStatus ne null",
-        f"Customer eq {odata_quote(customer)}"  # Filter by single customer
-    ]
+    def _fetch() -> List[Dict[str, Any]]:
+        filter_conditions = [
+            "OrderStatus eq 'Work in Progress'",
+            "ProductionStatus ne null",
+            f"Customer eq {odata_quote(customer)}",
+        ]
+        return fetch_and_process_orders(conn, odata_client, filter_conditions)
 
-    # Use the shared helper function
-    return fetch_and_process_orders(conn, odata_client, filter_conditions)
+    cache_key = f"open_orders:{instance}:customer:{customer}"
+
+    orders, source = fetch_or_cached(
+        cache_key=cache_key,
+        fetch_fn=_fetch,
+        force_refresh=True,             # try live first
+        max_age_minutes_when_open=0,    # ignored when force_refresh=True
+        fallback_http_statuses=(503,),  # blackout
+        fallback_on_timeouts=True,
+        fallback_on_conn_errors=True,
+        cooldown_on_503_minutes=10,
+    )
+    return {"data": orders, "source": source}
 
 
 def get_open_orders_by_group(conn, customer_group: str, instance: str) -> dict:

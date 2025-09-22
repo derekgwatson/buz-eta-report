@@ -13,6 +13,7 @@ from services.cache import (
     get_cache,
     set_cache,
 )
+import os
 
 SYD = ZoneInfo("Australia/Sydney")
 
@@ -43,6 +44,15 @@ def fetch_or_cached(
     """
     ensure_cache_table()
     entry = get_cache(cache_key)
+
+    if os.getenv("BUZ_FORCE_503") == "1":
+        if entry:
+            # stamp last_503_at_utc so cooldown logic also works
+            new_meta = dict(entry.meta or {})
+            new_meta["last_503_at_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
+            set_cache(cache_key, entry.payload, meta=new_meta)
+            return entry.payload, "cache-503-sim"
+        raise RuntimeError(f"Simulated 503 and no cached data for {cache_key}")
 
     # Cooldown: if we recently saw a 503, avoid hitting API for a bit
     if entry and cooldown_on_503_minutes > 0:
