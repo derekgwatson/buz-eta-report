@@ -30,3 +30,10 @@ class ProdConfig(BaseConfig):
     ENV = "production"
     LOG_LEVEL = logging.INFO
     RUN_REPORTS_INLINE = False
+
+
+class StagingConfig(BaseConfig):
+    DEBUG = False
+    ENV = "staging"
+    LOG_LEVEL = logging.DEBUG
+    RUN_REPORTS_INLINE = False

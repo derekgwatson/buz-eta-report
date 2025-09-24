@@ -107,6 +107,8 @@ def create_app() -> tuple[Flask, str]:
         from config import DevConfig as Cfg
     elif env == "production":
         from config import ProdConfig as Cfg
+    elif env == "staging":
+        from config import StagingConfig as Cfg
     else:
         raise RuntimeError(f"Unknown APP_ENV/FLASK_ENV value: {env!r}")
 
