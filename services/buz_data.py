@@ -44,7 +44,7 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
     _sales_report = _sales_report[_sales_report['ProductionStatus'].isin(status_mappings.keys())]
 
     # Map ProductionStatus using the status mappings
-    _sales_report['ProductionStatus'] = _sales_report['ProductionStatus'].map(
+    _sales_report.loc[:, 'ProductionStatus'] = _sales_report['ProductionStatus'].map(
         lambda x: status_mappings.get(x, x)
     )
 

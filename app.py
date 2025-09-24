@@ -5,7 +5,7 @@ from dotenv import load_dotenv
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, g, send_from_directory
 from flask_login import current_user
 import secrets
-from services.buz_data import get_open_orders, get_open_orders_by_group
+from services.eta_report import build_eta_report_context
 from authlib.integrations.flask_client import OAuth
 from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
 from datetime import timedelta
@@ -18,7 +18,12 @@ from flask_wtf.csrf import CSRFProtect
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from services.database import create_db_tables
-from datetime import datetime
+from concurrent.futures import ThreadPoolExecutor
+from services.job_service import create_job, update_job, get_job
+import uuid
+import atexit
+import requests
+from services.buz_data import get_data_by_order_no
 
 
 # Load environment variables from .env
@@ -36,6 +41,7 @@ sentry_sdk.init(
 # Initialize Flask app
 app = Flask(__name__)
 app.secret_key = os.getenv("FLASK_SECRET")
+app.executor = ThreadPoolExecutor(max_workers=2)
 
 # Set app configurations
 app.permanent_session_lifetime = timedelta(minutes=30)
@@ -80,6 +86,28 @@ login_manager.login_view = "login" # Set the default login view
 # Customize messages (optional)
 login_manager.login_message = "Please log in to access this page."
 login_manager.login_message_category = "error"
+
+
+def _make_executor():
+    return ThreadPoolExecutor(max_workers=2)
+
+
+def get_executor():
+    ex = getattr(app, "executor", None)
+    if ex is None:
+        ex = _make_executor()
+        app.executor = ex
+    return ex
+
+
+@atexit.register
+def _shutdown_executor():
+    ex = getattr(app, "executor", None)
+    if ex:
+        try:
+            ex.shutdown(wait=False, cancel_futures=True)  # py3.9+
+        except TypeError:
+            ex.shutdown(wait=False)
 
 
 # Close the database connection when the app context is destroyed
@@ -228,97 +256,70 @@ def eta_report_redirect(code):
     return redirect(url_for('eta_report', obfuscated_id=code), code=301)
 
 
-@app.route('/<obfuscated_id>')
-def eta_report(obfuscated_id):
-    customer = query_db("SELECT dd_name, cbr_name, field_type FROM customers WHERE obfuscated_id = ?", (obfuscated_id,), one=True)
-
-    if not customer:
-        error_message = f"No report found for ID: {obfuscated_id}"
-        return render_template('404.html', message=error_message), 404
-
+def _run_eta_report_job(job_id: str, obfuscated_id: str):
+    """
+    Runs outside request context in a thread.
+    Must open/close its own DB connection via get_db() (your get_db handles no-app-context).
+    Stores render payload in jobs.result as JSON: {"template": "...", "context": {...}}
+    """
+    db = get_db()  # your get_db() already returns a standalone conn when no app context
     try:
-        if customer[2] == 'Customer Group':
-            # Fetch data for both instances, ensuring customer fields are not empty
-            data_dd = get_open_orders_by_group(get_db(), customer[0], "DD") if customer[0] else []
-            data_cbr = get_open_orders_by_group(get_db(), customer[1], "CBR") if customer[1] else []
-        else:
-            # Fetch data for both instances, ensuring customer fields are not empty
-            data_dd = get_open_orders(get_db(), customer[0], "DD") if customer[0] else []
-            data_cbr = get_open_orders(get_db(), customer[1], "CBR") if customer[1] else []
+        update_job(job_id, pct=5, message="Loading customer…", db=db)
+        template, context, status = build_eta_report_context(obfuscated_id, db=db)
 
-        # Combine the results
-        combined_data = data_cbr + data_dd
-
-        # Group by RefNo
-        grouped_data = []
-        refno_to_date = {}
-
-        for item in combined_data:
-            ref_no = item.get("RefNo")
-            date_str = item.get("DateScheduled", "N/A")
-
-            if ref_no not in refno_to_date:
-                try:
-                    refno_to_date[ref_no] = datetime.strptime(date_str,
-                                                              "%d %b %Y") if date_str != "N/A" else datetime.min
-                except ValueError:
-                    refno_to_date[ref_no] = datetime.min  # Fallback for invalid date
-
-            # Add item to the group
-            group_entry = next((entry for entry in grouped_data if entry["RefNo"] == ref_no), None)
-            if not group_entry:
-                group_entry = {"RefNo": ref_no, "group_items": [], "DateScheduled": date_str}
-                grouped_data.append(group_entry)
-            group_entry["group_items"].append(item)
-
-            # Sort groups by DateScheduled
-        grouped_data.sort(key=lambda g: refno_to_date.get(g["RefNo"], datetime.min))
-
-        # Prepare customer name: handle the cases based on the conditions
-        if customer[0] == customer[1] or customer[1] == '':
-            customer_name = customer[0]  # Use customer[0] if they are the same or if customer[1] is empty
-        elif customer[0] == '':
-            customer_name = customer[1]  # Use customer[1] if customer[0] is empty
-        else:
-            customer_name = f"{customer[0]} / {customer[1]}"  # Use both names if they are different
-
-        def normalize_and_sort(values, case="title"):
-            """
-            Normalizes a list of strings: converts to lowercase, capitalizes the first letter of each word,
-            removes duplicates, and sorts them alphabetically.
-            """
-            if case == "upper":
-                return sorted({value.strip().upper() for value in values if value and value != "N/A"})
-            elif case == "lower":
-                return sorted({value.strip().lower() for value in values if value and value != "N/A"})
-            else:  # Default to title case
-                return sorted({value.strip().lower().title() for value in values if value and value != "N/A"})
-
-        # Compute unique filter options from combined data
-        unique_statuses = normalize_and_sort([item.get("ProductionStatus", "N/A") for item in combined_data])
-        unique_groups = normalize_and_sort([item.get("ProductionLine", "N/A") for item in combined_data])
-        unique_suppliers = normalize_and_sort([item.get("Instance", "N/A").upper() for item in combined_data],
-                                              case="upper")
-
-        # Pass the customer name along with the data to the template
-        if combined_data:
-            return render_template(
-                'report.html',
-                data=grouped_data,
-                customer_name=customer_name,
-                statuses=unique_statuses,
-                groups=unique_groups,
-                suppliers=unique_suppliers
-            )
-
-        return render_template('report.html', customer_name=customer_name)
-
+        # If not found or error, still complete with the 404/500 template payload
+        update_job(
+            job_id,
+            pct=100,
+            message="Ready",
+            result={"template": template, "context": context, "status": status},
+            done=True,
+            db=db,
+        )
     except Exception as e:
-        if app.debug:
-            raise e
-        else:
-            error_message = f"Failed to generate report for ID: {obfuscated_id}. Error: {str(e)}"
-            return render_template('500.html', message=error_message), 500
+        update_job(job_id, error=str(e), message="Job failed", db=db)
+        raise
+    finally:
+        try:
+            db.close()
+        except Exception:
+            pass
+
+
+@app.route("/<obfuscated_id>")
+def eta_report(obfuscated_id):
+    _ = get_db()  # ensures g.db exists this request (harmless if not used)
+
+    # Create a job row using request's g.db
+    job_id = str(uuid.uuid4())
+    create_job(job_id)  # uses g.db inside request context
+
+    # Kick the background worker
+    get_executor().submit(_run_eta_report_job, job_id, obfuscated_id)
+
+    # Render a lightweight page that polls /jobs/<job_id> and swaps in the final report
+    return render_template("report_loading.html", job_id=job_id)
+
+
+@app.get("/jobs/<job_id>")
+def job_status(job_id):
+    data = get_job(job_id)
+    if not data:
+        return jsonify({"error": "not found"}), 404
+    return jsonify(data)
+
+
+@app.get("/report/<job_id>")
+def report_render(job_id):
+    data = get_job(job_id)
+    if not data or data.get("status") != "completed":
+        return render_template("404.html", message="Report not ready or missing"), 404
+
+    result = data.get("result") or {}
+    template = result.get("template") or "report.html"
+    context = result.get("context") or {}
+    status = result.get("status") or 200
+    return render_template(template, **context), status
 
 
 @app.route('/delete/<int:customer_id>')

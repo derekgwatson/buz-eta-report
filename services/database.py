@@ -1,6 +1,6 @@
 import os
 import sqlite3
-from flask import g
+from flask import g, has_app_context
 
 
 # Database file path
@@ -55,15 +55,36 @@ def create_db_tables(conn=None):
         active BOOLEAN NOT NULL DEFAULT TRUE
     );
     ''', conn=conn)
+
+    execute_query('''
+    CREATE TABLE IF NOT EXISTS jobs (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,           -- running/completed/failed
+      pct INTEGER NOT NULL DEFAULT 0,
+      log TEXT NOT NULL DEFAULT '[]', -- json array of strings
+      error TEXT,
+      result TEXT,                    -- json
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    ''', conn=conn)
+
     print("Database tables created successfully")
 
 
 # Initialize the database connection using Flask's `g`
 def get_db():
-    if 'db' not in g:
-        g.db = sqlite3.connect(DB_PATH)
-        g.db.row_factory = sqlite3.Row  # Enables column-based access
-    return g.db
+    if has_app_context():
+        if 'db' not in g:
+            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            g.db = conn
+        return g.db
+    else:
+        # Background thread, return a standalone connection
+        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        return conn
 
 
 def query_db(query, args=(), one=False, logger=None, conn=None):

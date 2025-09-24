@@ -1,0 +1,44 @@
+{% extends "layout.html" %}
+{% block title %}Generating report…{% endblock %}
+{% block content %}
+<div class="container py-4">
+  <h3 class="mb-3">Generating your report…</h3>
+  <div id="progress" class="text-muted">Starting…</div>
+</div>
+
+<script>
+(function() {
+  const jobId = "{{ job_id }}";
+  const progressEl = document.getElementById('progress');
+
+  function htmlEscape(s){ return (s||"").toString().replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
+
+  async function poll() {
+    try {
+      const res = await fetch(`/jobs/${jobId}`, { headers: { "Accept": "application/json" }});
+      if (!res.ok) throw new Error("status " + res.status);
+      const data = await res.json();
+
+      // Show progress/log
+      const pct = data.pct ?? 0;
+      const logs = Array.isArray(data.log) ? data.log.slice(-5) : [];
+      progressEl.innerHTML = `Progress: ${pct}%<br>` + logs.map(htmlEscape).join("<br>");
+
+      if (data.status === "completed") {
+        // Navigate to the final rendered report
+        window.location.replace(`/report/${jobId}`);
+        return;
+      }
+      if (data.status === "failed") {
+        progressEl.innerHTML = `<span class="text-danger">Failed: ${htmlEscape(data.error||"Unknown error")}</span>`;
+        return;
+      }
+    } catch (e) {
+      progressEl.innerHTML = `<span class="text-danger">Polling error: ${htmlEscape(e.message)}</span>`;
+    }
+    setTimeout(poll, 1200);
+  }
+  poll();
+})();
+</script>
+{% endblock %}
