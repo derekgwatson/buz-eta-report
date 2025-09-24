@@ -11,23 +11,6 @@ def _raise_in_dev() -> bool:
     )
 
 
-# services/database.py
-import os
-from flask import current_app, has_app_context
-
-
-def _resolve_db_path():
-    if has_app_context():
-        name = (current_app.config.get("DATABASE")
-                or current_app.config.get("DATABASE_FILE")
-                or "customers.db")
-        # join to instance folder unless absolute
-        return name if os.path.isabs(name) else os.path.join(current_app.instance_path, name)
-    # (only for scripts run completely outside Flask)
-    name = os.getenv("DATABASE_PATH", "customers.db")
-    return name if os.path.isabs(name) else os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), name)
-
-
 # Initialize the database connection using Flask's `g`
 def update_status_mapping(odata_statuses, conn=None):
     conn = conn or get_db()
@@ -84,23 +67,34 @@ def create_db_tables(conn=None):
     print("Database tables created successfully")
 
 
-# Initialize the database connection using Flask's `g`
-def get_db():
+def _get_db_path() -> str:
+    # Always require DATABASE to be set
+    path = (
+        current_app.config.get("DATABASE")
+        if has_app_context()
+        else os.environ.get("DATABASE")
+    )
+    if not path:
+        raise RuntimeError("DATABASE environment variable is not set")
+    return path
+
+
+def _connect(path: str) -> sqlite3.Connection:
+    conn = sqlite3.connect(path, check_same_thread=False)
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys=ON")
+    conn.execute("PRAGMA journal_mode=WAL")
+    return conn
+
+
+def get_db() -> sqlite3.Connection:
     if has_app_context():
-        if 'db' not in g:
-            conn = sqlite3.connect(_resolve_db_path(), check_same_thread=False)
-            conn.row_factory = sqlite3.Row
-            conn.execute("PRAGMA foreign_keys=ON")
-            conn.execute("PRAGMA journal_mode=WAL")
-            g.db = conn
+        if "db" not in g:
+            g.db = _connect(_get_db_path())
         return g.db
     else:
-        # Background thread, return a standalone connection
-        conn = sqlite3.connect(_resolve_db_path(), check_same_thread=False)
-        conn.row_factory = sqlite3.Row
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA journal_mode=WAL")
-        return conn
+        # background job / script
+        return _connect(_get_db_path())
 
 
 def query_db(query, args=(), one=False, logger=None, conn=None):

@@ -22,9 +22,11 @@ class DevConfig(BaseConfig):
     TRAP_HTTP_EXCEPTIONS = True
     DEBUG_SQL = True
     RAISE_ON_DB_ERROR = True  # fail fast in dev
+    RUN_REPORTS_INLINE = True
 
 
 class ProdConfig(BaseConfig):
     DEBUG = False
     ENV = "production"
     LOG_LEVEL = logging.INFO
+    RUN_REPORTS_INLINE = False

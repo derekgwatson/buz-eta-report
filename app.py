@@ -95,8 +95,12 @@ def _configure_logging(app: Flask) -> None:
 
 def create_app() -> tuple[Flask, str]:
     app = Flask(__name__, instance_relative_config=True)
-    Path(app.instance_path).mkdir(parents=True, exist_ok=True)
-    app.config["DATABASE"] = "customers.db"
+
+    # databse path
+    db_path = os.environ.get("DATABASE")
+    if not db_path:
+        raise RuntimeError("DATABASE env var is required")
+    app.config["DATABASE"] = db_path
 
     env = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "production").lower()
     if env == "development":
@@ -543,6 +547,36 @@ def add_user():
     return redirect(url_for("manage_users"))
 
 
+@app.route('/delete/<int:customer_id>')
+def delete_customer(customer_id):
+    query_db("DELETE FROM customers WHERE id = ?", (customer_id,))
+    return redirect(url_for('admin'))
+
+
+@app.route('/edit/<int:customer_id>', methods=['GET', 'POST'])
+def edit_customer(customer_id):
+    if request.method == 'POST':
+        # Fetch updated form data
+        name = request.form['name']
+        url = request.form['url']
+        title = request.form['title']
+
+        # Update the customer in the database
+        query_db(
+            "UPDATE customers SET name = ?, url = ?, title = ? WHERE id = ?",
+            (name, url, title, customer_id),
+        )
+        return redirect(url_for('admin'))
+
+    # Fetch customer details for pre-filling the form
+    customer = query_db(
+        "SELECT id, name, url, title FROM customers WHERE id = ?", (customer_id,), one=True
+    )
+    if not customer:
+        return "Customer not found", 404
+    return render_template('edit.html', customer=customer)
+
+
 @app.route("/edit_user/<int:user_id>", methods=["GET", "POST"])
 @login_required
 @role_required("admin")
@@ -641,7 +675,7 @@ def prewarm_cache(instances):
 
 
 # ---------- env validation ----------
-REQ_ALWAYS = ["FLASK_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DATABASE_PATH"]
+REQ_ALWAYS = ["FLASK_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DATABASE"]
 REQ_PROD = ["SERVER_NAME"]  # SENTRY_DSN optional; don’t block startup
 
 _missing = [v for v in REQ_ALWAYS if not os.getenv(v)]

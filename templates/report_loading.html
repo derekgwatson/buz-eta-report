@@ -29,8 +29,13 @@
         window.location.replace(`/report/${jobId}`);
         return;
       }
+
       if (data.status === "failed") {
-        progressEl.innerHTML = `<span class="text-danger">Failed: ${htmlEscape(data.error||"Unknown error")}</span>`;
+        let html = `<span class="text-danger">Failed: ${htmlEscape(data.error||"Unknown error")}</span>`;
+        if (data.traceback) {
+          html += `<pre class="mt-3 text-muted small">${htmlEscape(data.traceback)}</pre>`;
+        }
+        progressEl.innerHTML = html;
         return;
       }
     } catch (e) {

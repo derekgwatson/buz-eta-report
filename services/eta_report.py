@@ -1,6 +1,6 @@
 # services/eta_report.py
 from datetime import datetime
-from typing import Dict, List, Tuple, Callable, Optional
+from typing import Dict, List, Tuple, Callable, Optional, Iterable
 
 from services.database import get_db
 from services.buz_data import get_open_orders, get_open_orders_by_group
@@ -77,6 +77,28 @@ def _prog(progress: ProgressFn, msg: str, pct: Optional[int] = None) -> None:
         pass
 
 
+def _to_list_of_dicts(x) -> List[Dict]:
+    """Coerce various shapes (None, dict, list, tuple, generators, API envelopes) into a list[dict]."""
+    if x is None:
+        return []
+    if isinstance(x, list):
+        return x
+    if isinstance(x, dict):
+        # common API envelopes
+        for key in ("data", "rows", "items", "results"):
+            v = x.get(key)
+            if isinstance(v, list):
+                return v
+        # single record dict → wrap
+        return [x]
+    if isinstance(x, tuple):
+        return list(x)
+    if isinstance(x, Iterable):
+        return list(x)  # generator / cursor
+    # last resort
+    return [x]
+
+
 def build_eta_report_context(
     obfuscated_id: str,
     db=None,
@@ -103,11 +125,19 @@ def build_eta_report_context(
 
     _prog(progress, "Fetching orders…", 20)
     if field_type == "Customer Group":
-        data_dd = get_open_orders_by_group(db, dd_name, "DD") if dd_name else []
-        data_cbr = get_open_orders_by_group(db, cbr_name, "CBR") if cbr_name else []
+        data_dd_raw = get_open_orders_by_group(db, dd_name, "DD") if dd_name else []
+        data_cbr_raw = get_open_orders_by_group(db, cbr_name, "CBR") if cbr_name else []
     else:
-        data_dd = get_open_orders(db, dd_name, "DD") if dd_name else []
-        data_cbr = get_open_orders(db, cbr_name, "CBR") if cbr_name else []
+        data_dd_raw = get_open_orders(db, dd_name, "DD") if dd_name else []
+        data_cbr_raw = get_open_orders(db, cbr_name, "CBR") if cbr_name else []
+
+    # Normalize to lists
+    data_dd = _to_list_of_dicts(data_dd_raw)
+    data_cbr = _to_list_of_dicts(data_cbr_raw)
+
+    # In dev, fail fast with a clear message if not lists
+    assert isinstance(data_dd, list) and isinstance(data_cbr, list), \
+        f"get_open_orders* must return list; got {type(data_dd_raw)} and {type(data_cbr_raw)}"
 
     combined_data = data_cbr + data_dd
 
