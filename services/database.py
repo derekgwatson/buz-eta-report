@@ -1,29 +1,47 @@
 import os
 import sqlite3
-from flask import g, has_app_context
+from flask import current_app, g, has_app_context
 
 
-# Database file path
-DB_PATH = os.getenv("DATABASE_PATH", "customers.db")
+def _raise_in_dev() -> bool:
+    # raise if we’re in a Flask app context and dev wants hard failures
+    return has_app_context() and (
+        getattr(current_app, "debug", False)
+        or current_app.config.get("RAISE_ON_DB_ERROR", False)
+    )
 
 
+def _resolve_db_path():
+    # Prefer Flask config when available
+    if has_app_context() and current_app.config.get("DATABASE"):
+        return current_app.config["DATABASE"]
+    # Fallback for scripts run outside app context
+    name = os.getenv("DATABASE_PATH", "customers.db")
+    if os.path.isabs(name):
+        return name
+    # Anchor relative fallback to this repo (project) root
+    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
+    return os.path.join(project_root, name)
+
+
+# Initialize the database connection using Flask's `g`
 def update_status_mapping(odata_statuses, conn=None):
-    # Mark old statuses as inactive
-    execute_query('''
-    UPDATE status_mapping 
-    SET active = FALSE 
-    WHERE odata_status NOT IN (
-        SELECT odata_status FROM (VALUES {}) 
-    );
-    '''.format(', '.join(f"('{s}')" for s in odata_statuses)), conn=conn)
+    conn = conn or get_db()
+    statuses = list(dict.fromkeys(odata_statuses or []))
 
-    # Insert new or reactivate existing statuses
-    for status in odata_statuses:
-        execute_query('''
-        INSERT INTO status_mapping (odata_status, active) 
-        VALUES (?, TRUE)
-        ON CONFLICT (odata_status) DO UPDATE SET active = TRUE;
-        ''', args=(status,), conn=None)
+    if statuses:
+        placeholders = ",".join("?" for _ in statuses)
+        conn.execute(f"UPDATE status_mapping SET active = 0 WHERE odata_status NOT IN ({placeholders})", statuses)
+    else:
+        # If nothing from OData, mark all inactive
+        conn.execute("UPDATE status_mapping SET active = 0")
+
+    conn.executemany(
+        "INSERT INTO status_mapping (odata_status, active) VALUES (?, 1) "
+        "ON CONFLICT(odata_status) DO UPDATE SET active = 1",
+        [(s,) for s in statuses]
+    )
+    conn.commit()
 
 
 def create_db_tables(conn=None):
@@ -34,16 +52,6 @@ def create_db_tables(conn=None):
             name TEXT,
             role TEXT NOT NULL DEFAULT 'user',
             active INTEGER NOT NULL DEFAULT 1
-        )
-    ''', conn=conn)
-
-    execute_query('''
-        CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            dd_name TEXT,
-            cbr_name TEXT,
-            obfuscated_id TEXT NOT NULL UNIQUE,
-            field_type TEXT
         )
     ''', conn=conn)
 
@@ -76,40 +84,71 @@ def create_db_tables(conn=None):
 def get_db():
     if has_app_context():
         if 'db' not in g:
-            conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+            conn = sqlite3.connect(_resolve_db_path(), check_same_thread=False)
             conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA journal_mode=WAL")
             g.db = conn
         return g.db
     else:
         # Background thread, return a standalone connection
-        conn = sqlite3.connect(DB_PATH, check_same_thread=False)
+        conn = sqlite3.connect(_resolve_db_path(), check_same_thread=False)
         conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA journal_mode=WAL")
         return conn
 
 
 def query_db(query, args=(), one=False, logger=None, conn=None):
     if conn is None:
-        conn = get_db()  # get_db() is called at runtime, ensuring proper context
-
+        conn = get_db()
+    cur = None
     try:
-        cur = conn.cursor()
-        cur.execute(query, args)
-        rv = cur.fetchall()
-        conn.commit()
-        return (rv[0] if rv else None) if one else rv
+        cur = conn.execute(query, args)
+        rows = cur.fetchall()
+
+        # commit only for writes
+        first_kw = query.lstrip().split(None, 1)[0].upper() if query else ""
+        if first_kw in {"INSERT","UPDATE","DELETE","REPLACE","CREATE","DROP","ALTER"}:
+            conn.commit()
+
+        if one:
+            return rows[0] if rows else None
+        return rows or []                # <- never None for multi-row
     except sqlite3.Error as e:
-        if logger:
-            logger.error(f"Database error: {e}")
-        return None
+        (logger or current_app.logger).exception(
+            f"DB error running: {query!r} args={args!r}"
+        )
+        if _raise_in_dev():
+            raise
+        return None if one else []
+
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except:
+                pass
 
 
-def execute_query(query, args=(), conn=None):
+def execute_query(query, args=(), conn=None, logger=None):
     if conn is None:
-        conn = get_db()  # get_db() is called at runtime, ensuring proper context
-
+        conn = get_db()
+    cur = None
     try:
-        cur = conn.cursor()
-        cur.execute(query, args)
+        cur = conn.execute(query, args)
         conn.commit()
-    except sqlite3.IntegrityError as e:
-        raise ValueError("Integrity error") from e
+    except sqlite3.Error as e:
+        (logger or current_app.logger).exception(
+            f"DB write error: {query!r} args={args!r}"
+        )
+        if _raise_in_dev():
+            raise
+        # bubble up as a clean app-level error if you prefer:
+        # raise ValueError("Integrity/DB error") from e
+    finally:
+        if cur is not None:
+            try:
+                cur.close()
+            except:
+                pass

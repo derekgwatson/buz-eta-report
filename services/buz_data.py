@@ -1,35 +1,60 @@
-import requests
-from services.odata_client import ODataClient
+from __future__ import annotations
+
+from typing import Dict, Any, List
 import pandas as pd
+from services.odata_client import ODataClient
+from services.fetcher import fetch_or_cached
+from services.odata_utils import odata_quote
 
 
-def get_statuses(instance):
-    # Base URL for SalesReport
+def get_statuses(instance: str) -> dict:
+    """
+    Returns a dict with:
+      - data: list[str] of statuses
+      - source: 'live' | 'cache' | 'cache-503' | 'cache-timeout' | 'cache-error'
+    """
     odata_client = ODataClient(instance)
 
-    # Define instance-specific filters
-    filter_conditions = [
-            "OrderStatus eq 'Work in Progress'",
-            "ProductionStatus ne 'null'",
-        ]
+    def _fetch() -> List[str]:
+        rows = odata_client.get(
+            "JobsScheduleDetailed",
+            ["OrderStatus eq 'Work in Progress'", "ProductionStatus ne null"],
+        ) or []
+        uniq = {
+            (r.get("ProductionStatus") or "").strip()
+            for r in rows
+            if r.get("ProductionStatus")
+        }
+        return sorted(uniq)
 
-    # Fetch filtered SalesReport data
-    report_data = odata_client.get("JobsScheduleDetailed", filter_conditions)
+    data, source = fetch_or_cached(
+        cache_key=f"statuses:{instance}",
+        fetch_fn=_fetch,
+        # Always try live first; fall back on 503/timeouts/conn errors
+        force_refresh=True,
+        max_age_minutes_when_open=0,   # ignored because force_refresh=True
+        fallback_http_statuses=(503,), # treat 503 as blackout
+        fallback_on_timeouts=True,
+        fallback_on_conn_errors=True,
+        cooldown_on_503_minutes=10,    # avoid hammering during blackout
+    )
 
-    statuses = {item["ProductionStatus"] for item in report_data if "ProductionStatus" in item}
-    return statuses
+    return {"data": data, "source": source}
 
 
 def fetch_and_process_orders(conn, odata_client, filter_conditions):
-    # Fetch filtered SalesReport data
+
     sales_report_data = odata_client.get("JobsScheduleDetailed", filter_conditions)
-
-    # Convert SalesReport data to Pandas DataFrame
-    _sales_report = pd.DataFrame(sales_report_data)
-
-    # Ensure DataFrame is not empty
-    if _sales_report.empty:
+    if not sales_report_data:
         return []
+    df = pd.DataFrame(sales_report_data)
+    if df.empty:
+        return []
+
+    required = {"RefNo", "Descn", "DateScheduled", "ProductionLine", "InventoryItem", "ProductionStatus", "FixedLine"}
+    for col in required:
+        if col not in df.columns:
+            df[col] = None
 
     # Fetch active status mappings from the database
     cursor = conn.cursor()
@@ -41,7 +66,7 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
     status_mappings = dict(cursor.fetchall())  # odata_status as keys, custom_status as values
 
     # Remove rows where the ProductionStatus is not in the active status mappings
-    _sales_report = _sales_report[_sales_report['ProductionStatus'].isin(status_mappings.keys())]
+    _sales_report = df[df['ProductionStatus'].isin(status_mappings.keys())]
 
     # Map ProductionStatus using the status mappings
     _sales_report.loc[:, 'ProductionStatus'] = _sales_report['ProductionStatus'].map(
@@ -60,90 +85,146 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
     return _sales_report.to_dict(orient="records")
 
 
-def get_customers_by_group(customer_group, instance):
-    # Base URL for SalesReport
+def get_customers_by_group(customer_group: str, instance: str) -> list[dict]:
+    """
+    Return customers in a given Buz customer group.
+    NOTE: Use 'OrderStatus' (no underscore) to match other queries in this file.
+    """
     odata_client = ODataClient(instance)
-
-    # Build the OData filter
-    filter_conditions = [
-        "Order_Status eq 'Work in Progress'",
-        f"CustomerGroup eq '{customer_group}'"  # Add Customer filter to OData
-    ]
-
-    # Fetch filtered SalesReport data
-    customers = odata_client.get("SalesReport", filter_conditions)
-    return customers
-
-
-def get_open_orders(conn, customer, instance):
-    # Base URL for SalesReport
-    odata_client = ODataClient(instance)
-
-    # Build the OData filter
     filter_conditions = [
         "OrderStatus eq 'Work in Progress'",
-        "ProductionStatus ne null",
-        f"Customer eq '{customer}'"  # Filter by single customer
+        f"CustomerGroup eq '{customer_group}'",
     ]
-
-    # Use the shared helper function
-    return fetch_and_process_orders(conn, odata_client, filter_conditions)
+    return odata_client.get("SalesReport", filter_conditions) or []
 
 
-def get_open_orders_by_group(conn, customer_group, instance):
-    # Base URL for SalesReport
+def get_open_orders(conn, customer: str, instance: str) -> dict:
+    """
+    Live-first; on 503/timeout/conn error, serve cached.
+    Returns {"data": list[dict], "source": "..."} like the group version.
+    """
     odata_client = ODataClient(instance)
 
-    # Fetch all customers in the specified group
-    customers = get_customers_by_group(customer_group, instance)
-    if not customers:
-        print(f"No customers found for the specified group in {instance}.")
-        return []
+    def _fetch() -> List[Dict[str, Any]]:
+        filter_conditions = [
+            "OrderStatus eq 'Work in Progress'",
+            "ProductionStatus ne null",
+            f"Customer eq {odata_quote(customer)}",
+        ]
+        return fetch_and_process_orders(conn, odata_client, filter_conditions)
 
-    # Extract unique customer names
-    customer_names = sorted({customer['Customer'].strip() for customer in customers})
+    cache_key = f"open_orders:{instance}:customer:{customer}"
 
-    # Set a maximum URL length threshold
-    MAX_URL_LENGTH = 1000  # Adjust if needed
+    orders, source = fetch_or_cached(
+        cache_key=cache_key,
+        fetch_fn=_fetch,
+        force_refresh=True,             # try live first
+        max_age_minutes_when_open=0,    # ignored when force_refresh=True
+        fallback_http_statuses=(503,),  # blackout
+        fallback_on_timeouts=True,
+        fallback_on_conn_errors=True,
+        cooldown_on_503_minutes=10,
+    )
+    return {"data": orders, "source": source}
 
-    # Prepare batched queries
-    results = []
-    batch = []
-    query_base_length = len("OrderStatus eq 'Work in Progress' and ProductionStatus ne null and Customer in ()")
 
-    for name in customer_names:
-        formatted_name = f"'{name}'"  # Properly format names
-        test_batch = batch + [formatted_name]  # Simulate adding a new name
+def get_open_orders_by_group(conn, customer_group: str, instance: str) -> dict:
+    """
+    Fetch open orders for all customers in the given group.
+    - Tries live first.
+    - If the API returns 503 (blackout) or times out / connection error, serves cached.
+    - Result is JSON-serialisable (list[dict]) and safe to store in cache.
+    """
+    odata_client = ODataClient(instance)
 
-        # Estimate the query length
-        estimated_length = query_base_length + len(", ".join(test_batch))
-        if estimated_length > MAX_URL_LENGTH:
-            # Send the current batch and reset it
+    def _fetch() -> List[Dict[str, Any]]:
+        # 1) Gather customers in the group
+        customers = get_customers_by_group(customer_group, instance)
+        if not customers:
+            return []
+
+        # 2) Unique, sorted customer names
+        customer_names = sorted({c["Customer"].strip() for c in customers if c.get("Customer")})
+
+        # 3) Batch to avoid overly long OData query strings
+        MAX_URL_LENGTH = 1000  # same threshold you used; adjust if needed
+        results: list[dict] = []
+        batch: list[str] = []
+        # Approximate base length of the query without names
+        base_len = len("OrderStatus eq 'Work in Progress' and ProductionStatus ne null and Customer in ()")
+
+        for name in customer_names:
+            quoted = odata_quote(name)
+            test_batch = batch + [quoted]
+            est_len = base_len + len(", ".join(test_batch))
+            if est_len > MAX_URL_LENGTH:
+                # flush current batch
+                customer_filter = f"Customer in ({', '.join(batch)})"
+                filter_conditions = [
+                    "OrderStatus eq 'Work in Progress'",
+                    "ProductionStatus ne null",
+                    customer_filter,
+                ]
+                results.extend(fetch_and_process_orders(conn, odata_client, filter_conditions))
+                batch = [quoted]  # start new batch
+            else:
+                batch.append(quoted)
+
+        # 4) Flush the final batch
+        if batch:
             customer_filter = f"Customer in ({', '.join(batch)})"
             filter_conditions = [
                 "OrderStatus eq 'Work in Progress'",
                 "ProductionStatus ne null",
-                customer_filter
+                customer_filter,
             ]
-            print(f"filter_condition: {filter_conditions}")
             results.extend(fetch_and_process_orders(conn, odata_client, filter_conditions))
-            batch = [formatted_name]  # Start a new batch
-        else:
-            batch.append(formatted_name)
 
-    # Send the last batch if it has data
-    if batch:
-        customer_filter = f"Customer in ({', '.join(batch)})"
-        filter_conditions = [
-            "OrderStatus eq 'Work in Progress'",
-            "ProductionStatus ne null",
-            customer_filter
-        ]
-        results.extend(fetch_and_process_orders(conn, odata_client, filter_conditions))
+        return results
 
-    return results
+    # Cache key includes instance + group
+    cache_key = f"open_orders_by_group:{instance}:{customer_group}"
+
+    orders, source = fetch_or_cached(
+        cache_key=cache_key,
+        fetch_fn=_fetch,
+        # Always attempt live first; fall back if 503/timeout/conn error
+        force_refresh=True,
+        max_age_minutes_when_open=0,    # ignored because force_refresh=True
+        fallback_http_statuses=(503,),  # treat 503 as blackout
+        fallback_on_timeouts=True,
+        fallback_on_conn_errors=True,
+        cooldown_on_503_minutes=10,     # avoid hammering during blackout
+    )
+
+    return {"data": orders, "source": source}
 
 
-def get_data_by_order_no(order_no, endpoint, instance):
-    """Fetch and return JobsScheduleDetails data for a given order number."""
-    return ODataClient(instance).get(endpoint, [f"RefNo eq '{order_no}'"])
+def get_data_by_order_no(order_no: str, endpoint: str, instance: str) -> dict:
+    """
+    Fetch order data for a specific order number.
+    - Tries live first.
+    - If the API returns 503 (blackout) or times out / connection error, serves cached.
+    - Result is JSON-serialisable (list[dict]).
+    """
+    odata_client = ODataClient(instance)
+
+    def _fetch() -> List[dict[str, Any]]:
+        filter_conditions = [f"RefNo eq {odata_quote(order_no)}"]
+        rows = odata_client.get(endpoint, filter_conditions) or []
+        # Normalise to JSON-friendly list[dict]
+        return [dict(r) for r in rows]
+
+    cache_key = f"order:{instance}:{endpoint}:{order_no}"
+
+    orders, source = fetch_or_cached(
+        cache_key=cache_key,
+        fetch_fn=_fetch,
+        force_refresh=True,             # always attempt live first
+        max_age_minutes_when_open=0,    # ignored when force_refresh=True
+        fallback_http_statuses=(503,),  # 503 = blackout
+        fallback_on_timeouts=True,
+        fallback_on_conn_errors=True,
+        cooldown_on_503_minutes=10,     # avoid hammering API during blackout
+    )
+    return {"data": orders, "source": source}

@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Sales Report</title>
+    <link rel="stylesheet" href="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/css/bootstrap.min.css">
     <style>
         body {
             font-family: Arial, sans-serif;
@@ -126,16 +127,61 @@
             color: #e74c3c;
         }
 
+    </style>
 
+    <style>
+        /* styling for the download links */
 
+        /* Make the export button a “ghost” until hovered */
+        .page-actions .btn-default {
+          background: transparent;
+          border-color: transparent;
+          color: #777;
+        }
+        .page-actions .btn-default:hover,
+        .page-actions .open .btn-default {
+          background: #f7f7f7;
+          border-color: #ccc;
+          color: #333;
+        }
+        .page-header { margin-top: 10px; margin-bottom: 15px; }
     </style>
     <link rel="icon" href="/static/favicon.ico" type="image/x-icon">
 </head>
 <body>
-    <div class="header">
-        <h1>Open Orders for {{ customer_name }}</h1>
-        <img src="{{ url_for('static', filename='watson_logo.png') }}" alt="Watson Logo" class="logo">
+<div class="header">
+  <h1>Open Orders for {{ customer_name }}</h1>
+
+{% if source != "live" %}
+  <div class="alert alert-warning py-2 my-2">
+    Showing cached data ({{ source }}).
+    {% if last_dd %}DD last refreshed: {{ last_dd }}. {% endif %}
+    {% if last_cbr %}CBR last refreshed: {{ last_cbr }}.{% endif %}
+  </div>
+{% else %}
+  <div class="alert alert-success py-2 my-2">
+    Live data.
+  </div>
+{% endif %}
+
+  <div class="header-rail">
+    <div class="btn-group btn-group-sm export-group">
+      <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="Export current view">
+        <span class="glyphicon glyphicon-download-alt"></span>
+        <span class="hidden-xs"> Export</span> <span class="caret"></span>
+      </button>
+      <ul class="dropdown-menu dropdown-menu-right">
+        <li class="dropdown-header">Download</li>
+        <li><a id="downloadCsv"  href="{{ csv_url }}" data-base="{{ csv_url }}"><span class="glyphicon glyphicon-file"></span> CSV (.csv)</a></li>
+        <li><a id="downloadXlsx" href="{{ xlsx_url }}" data-base="{{ xlsx_url }}"><span class="glyphicon glyphicon-list-alt"></span> Excel (.xlsx)</a></li>
+      </ul>
     </div>
+
+    <button class="btn btn-success btn-sm" onclick="toggleSidebar()">Toggle Sidebar</button>
+    <img src="{{ url_for('static', filename='watson_logo.png') }}" class="logo" alt="Watson Logo">
+  </div>
+</div>
+
 
     <!-- Filter Section -->
  <div id="filters">
@@ -168,223 +214,246 @@
     </form>
 </div>
 
+<div class="container" id="container">
+    <!-- Main Content -->
+    <div class="content" id="content">
+{% if data and data|length > 0 %}
+    {% for group in data %}
+        <!-- Order Header -->
+        {% if group.group_items and group.group_items|length > 0 %}
+            <div class="order-header">
+                <strong>Supplier:</strong>
+                    <span id="SupplierCode">{{ group.group_items[0].Instance or 'N/A' }}</span> |
+                <strong>Expected:</strong> {{ group.DateScheduled or 'N/A' }} |
+                <strong>Order #:</strong> {{ group.RefNo or 'N/A' }} |
+                <strong>Ref:</strong> {{ group.group_items[0].Descn or 'N/A' }}
+            </div>
+        {% else %}
+            <div class="order-header">
+                <strong>No items available for this group.</strong>
+            </div>
+        {% endif %}
 
-    <!-- Toggle Button -->
-    <button class="toggle-sidebar" onclick="toggleSidebar()">Toggle Sidebar</button>
-
-    <div class="container" id="container">
-        <!-- Main Content -->
-        <div class="content" id="content">
-    {% if data and data|length > 0 %}
-        {% for group in data %}
-            <!-- Order Header -->
-            {% if group.group_items and group.group_items|length > 0 %}
-                <div class="order-header">
-                    <strong>Supplier:</strong>
-                        <span id="SupplierCode">{{ group.group_items[0].Instance or 'N/A' }}</span> |
-                    <strong>Expected:</strong> {{ group.DateScheduled or 'N/A' }} |
-                    <strong>Order #:</strong> {{ group.RefNo or 'N/A' }} |
-                    <strong>Ref:</strong> {{ group.group_items[0].Descn or 'N/A' }}
-                </div>
-            {% else %}
-                <div class="order-header">
-                    <strong>No items available for this group.</strong>
-                </div>
-            {% endif %}
-
-            <!-- Items Table -->
-            {% if group.group_items and group.group_items|length > 0 %}
-                <table>
-                    <thead>
+        <!-- Items Table -->
+        {% if group.group_items and group.group_items|length > 0 %}
+            <table>
+                <thead>
+                    <tr>
+                        <th>Group</th>
+                        <th>Item</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in group.group_items %}
                         <tr>
-                            <th>Group</th>
-                            <th>Item</th>
-                            <th>Status</th>
+                            <td>{{ item.ProductionLine or 'N/A' }}</td>
+                            <td>{{ item.InventoryItem or 'N/A' }} ({{ item.FixedLine or 'N/A' }})</td>
+                            <td>{{ item.ProductionStatus or 'N/A' }}</td>
                         </tr>
-                    </thead>
-                    <tbody>
-                        {% for item in group.group_items %}
-                            <tr>
-                                <td>{{ item.ProductionLine or 'N/A' }}</td>
-                                <td>{{ item.InventoryItem or 'N/A' }} ({{ item.FixedLine or 'N/A' }})</td>
-                                <td>{{ item.ProductionStatus or 'N/A' }}</td>
-                            </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
-            {% endif %}
-        {% endfor %}
-    {% else %}
-        <p class="no-data">No data available to display. If you believe this is incorrect, please contact us to
-            confirm that we have the correct supplier name on file.</p>
-    {% endif %}
-</div>
-
-
-
-        <!-- Sidebar -->
-        <div class="sidebar" id="sidebar">
-            <h2>Lead Times</h2>
-            <p><strong>Date:</strong> Date order is due to be completed by our production team.</p>
-            <p><strong>Order #:</strong> Use this when making an enquiry about your order.</p>
-            <p><strong>Description:</strong> A summary of the order, generally the location. This was entered by you when creating the order.</p>
-            <p><strong>Status:</strong> The stage your order is at in our factory.</p>
-
-            <h3>Lead Times</h3>
-            <p>A confirmation email is sent when your order has been accepted. Lead times are calculated from the accepted date.</p>
-            <p>Add one week for powder coating, European and special order fabrics, and large quantity orders.</p>
-            <p>Please allow an extra one day lead time either side of the manufacturing lead times specified at the time you place your order.</p>
-            <p>Lead times do not take into account delays for out-of-stock items, query response times, or delivery to your location.</p>
-            <p>Lead times are specified in business days and do not include weekends or public holidays.</p>
-            <p>Any delays will be communicated to your nominated email address.</p>
-        </div>
+                    {% endfor %}
+                </tbody>
+            </table>
+        {% endif %}
+    {% endfor %}
+{% else %}
+    <p class="no-data">No data available to display. If you believe this is incorrect, please contact us to
+        confirm that we have the correct supplier name on file.</p>
+{% endif %}
     </div>
 
-    <script>
-        // On page load, apply the user's saved sidebar state
-        window.onload = function () {
-            const sidebar = document.getElementById('sidebar');
-            const content = document.getElementById('content');
-            const sidebarState = localStorage.getItem('sidebarState'); // Get state from localStorage
+    <!-- Sidebar -->
+    <div class="sidebar" id="sidebar">
+        <h2>Lead Times</h2>
+        <p><strong>Date:</strong> Date order is due to be completed by our production team.</p>
+        <p><strong>Order #:</strong> Use this when making an enquiry about your order.</p>
+        <p><strong>Description:</strong> A summary of the order, generally the location. This was entered by you when creating the order.</p>
+        <p><strong>Status:</strong> The stage your order is at in our factory.</p>
 
-            if (sidebarState === 'hidden') {
-                sidebar.classList.add('hidden');
-                content.style.flex = "1 1 100%";
-            }
-        };
-
-        function toggleSidebar() {
-            const sidebar = document.getElementById('sidebar');
-            const content = document.getElementById('content');
-
-            if (sidebar.classList.contains('hidden')) {
-                // Show the sidebar
-                sidebar.classList.remove('hidden');
-                content.style.flex = "1"; // Return to shared layout
-                localStorage.setItem('sidebarState', 'visible'); // Save state
-            } else {
-                // Hide the sidebar
-                sidebar.classList.add('hidden');
-                content.style.flex = "1 1 100%"; // Take the full width
-                localStorage.setItem('sidebarState', 'hidden'); // Save state
-            }
-        }
-
-    </script>
+        <h3>Lead Times</h3>
+        <p>A confirmation email is sent when your order has been accepted. Lead times are calculated from the accepted date.</p>
+        <p>Add one week for powder coating, European and special order fabrics, and large quantity orders.</p>
+        <p>Please allow an extra one day lead time either side of the manufacturing lead times specified at the time you place your order.</p>
+        <p>Lead times do not take into account delays for out-of-stock items, query response times, or delivery to your location.</p>
+        <p>Lead times are specified in business days and do not include weekends or public holidays.</p>
+        <p>Any delays will be communicated to your nominated email address.</p>
+    </div>
+</div>
 
 <script>
-document.addEventListener("DOMContentLoaded", () => {
-    handleFilterVisibilityOnPageLoad();
+    // On page load, apply the user's saved sidebar state
+    window.onload = function () {
+        const sidebar = document.getElementById('sidebar');
+        const content = document.getElementById('content');
+        const sidebarState = localStorage.getItem('sidebarState'); // Get state from localStorage
 
-    // Attach event listeners for dynamic filtering
-    const dropdowns = document.querySelectorAll("#filterForm select, #filterForm input[type='date']");
-    dropdowns.forEach(dropdown => {
-        dropdown.addEventListener("change", applyFilters); // Trigger filtering on change
-    });
+        if (sidebarState === 'hidden') {
+            sidebar.classList.add('hidden');
+            content.style.flex = "1 1 100%";
+        }
+    };
 
-    // Attach event listener for Clear Filters button
-    const clearButton = document.getElementById("clearFiltersButton");
-    if (clearButton) {
-        clearButton.addEventListener("click", clearFilters);
+    function toggleSidebar() {
+        const sidebar = document.getElementById('sidebar');
+        const content = document.getElementById('content');
+
+        if (sidebar.classList.contains('hidden')) {
+            // Show the sidebar
+            sidebar.classList.remove('hidden');
+            content.style.flex = "1"; // Return to shared layout
+            localStorage.setItem('sidebarState', 'visible'); // Save state
+        } else {
+            // Hide the sidebar
+            sidebar.classList.add('hidden');
+            content.style.flex = "1 1 100%"; // Take the full width
+            localStorage.setItem('sidebarState', 'hidden'); // Save state
+        }
     }
-});
+    document.addEventListener("DOMContentLoaded", () => {
+        handleFilterVisibilityOnPageLoad();
 
-function handleFilterVisibilityOnPageLoad() {
-    const filters = [
-        { element: document.getElementById("statusFilter"), label: document.getElementById("statusFilterLabel") },
-        { element: document.getElementById("groupFilter"), label: document.getElementById("groupFilterLabel") },
-        { element: document.getElementById("supplierFilter"), label: document.getElementById("supplierFilterLabel") },
-    ];
+        // Attach event listeners for dynamic filtering
+        const dropdowns = document.querySelectorAll("#filterForm select, #filterForm input[type='date']");
+        dropdowns.forEach(dropdown => {
+            dropdown.addEventListener("change", applyFilters); // Trigger filtering on change
+        });
 
-    let visibleFilters = 0;
-
-    filters.forEach(filter => {
-        if (filter.element && filter.element.options.length <= 2) {
-            // Hide the filter and its label
-            filter.label.style.display = "none";
-            filter.element.style.display = "none";
-        } else if (filter.element) {
-            // Show the filter and its label
-            filter.label.style.display = "";
-            filter.element.style.display = "";
-            visibleFilters++;
+        // Attach event listener for Clear Filters button
+        const clearButton = document.getElementById("clearFiltersButton");
+        if (clearButton) {
+            clearButton.addEventListener("click", clearFilters);
         }
     });
 
-    // Hide the entire filter block if no filters are visible
-    const filterForm = document.getElementById("filterForm");
-    if (visibleFilters === 0) {
-        filterForm.style.display = "none";
-    } else {
-        filterForm.style.display = "";
-    }
-}
+    function handleFilterVisibilityOnPageLoad() {
+        const filters = [
+            { element: document.getElementById("statusFilter"), label: document.getElementById("statusFilterLabel") },
+            { element: document.getElementById("groupFilter"), label: document.getElementById("groupFilterLabel") },
+            { element: document.getElementById("supplierFilter"), label: document.getElementById("supplierFilterLabel") },
+        ];
 
-function applyFilters() {
-    // Safely get filter values
-    const statusFilter = document.getElementById("statusFilter").value.toLowerCase() || "";
-    const groupFilter = document.getElementById("groupFilter").value.toLowerCase() || "";
-    const supplierFilter = document.getElementById("supplierFilter").value.toUpperCase() || "";
+        let visibleFilters = 0;
 
-    console.log("Filters:", { statusFilter, groupFilter, supplierFilter });
-
-    // Get all order headers and rows
-    const orderHeaders = document.querySelectorAll(".order-header");
-
-    orderHeaders.forEach(header => {
-        // Get supplier value from the header
-        const supplierSpan = header.querySelector("#SupplierCode");
-        const supplier = supplierSpan ? supplierSpan.textContent.toUpperCase().trim() : ""; // Normalize to uppercase
-
-        // Get rows under this header
-        const rows = header.nextElementSibling.querySelectorAll("tbody tr");
-
-        let hasVisibleRow = false; // Track if any row is visible
-
-        rows.forEach(row => {
-            const status = row.children[2]?.textContent.toLowerCase().trim() || "";
-            const group = row.children[0]?.textContent.toLowerCase().trim() || "";
-
-            // Apply filter logic
-            const matchesStatus = !statusFilter || status === statusFilter;
-            const matchesGroup = !groupFilter || group === groupFilter;
-            const matchesSupplier = !supplierFilter || supplier === supplierFilter;
-
-            if (matchesStatus && matchesGroup && matchesSupplier) {
-                row.style.display = ""; // Show row
-                hasVisibleRow = true; // At least one row is visible
-            } else {
-                row.style.display = "none"; // Hide row
+        filters.forEach(filter => {
+            if (filter.element && filter.element.options.length <= 2) {
+                // Hide the filter and its label
+                filter.label.style.display = "none";
+                filter.element.style.display = "none";
+            } else if (filter.element) {
+                // Show the filter and its label
+                filter.label.style.display = "";
+                filter.element.style.display = "";
+                visibleFilters++;
             }
         });
 
-        // Show or hide the entire block based on rows' visibility
-        if (hasVisibleRow) {
-            header.style.display = ""; // Show header
-            header.nextElementSibling.style.display = ""; // Show associated table
+        // Hide the entire filter block if no filters are visible
+        const filterForm = document.getElementById("filterForm");
+        if (visibleFilters === 0) {
+            filterForm.style.display = "none";
         } else {
-            header.style.display = "none"; // Hide header
-            header.nextElementSibling.style.display = "none"; // Hide associated table
+            filterForm.style.display = "";
         }
+    }
+
+    function applyFilters() {
+        // Safely get filter values
+        const statusFilter = document.getElementById("statusFilter").value.toLowerCase() || "";
+        const groupFilter = document.getElementById("groupFilter").value.toLowerCase() || "";
+        const supplierFilter = document.getElementById("supplierFilter").value.toUpperCase() || "";
+
+        console.log("Filters:", { statusFilter, groupFilter, supplierFilter });
+
+        // Get all order headers and rows
+        const orderHeaders = document.querySelectorAll(".order-header");
+
+        orderHeaders.forEach(header => {
+            // Get supplier value from the header
+            const supplierSpan = header.querySelector("#SupplierCode");
+            const supplier = supplierSpan ? supplierSpan.textContent.toUpperCase().trim() : ""; // Normalize to uppercase
+
+            // Get rows under this header
+            const rows = header.nextElementSibling.querySelectorAll("tbody tr");
+
+            let hasVisibleRow = false; // Track if any row is visible
+
+            rows.forEach(row => {
+                const status = row.children[2]?.textContent.toLowerCase().trim() || "";
+                const group = row.children[0]?.textContent.toLowerCase().trim() || "";
+
+                // Apply filter logic
+                const matchesStatus = !statusFilter || status === statusFilter;
+                const matchesGroup = !groupFilter || group === groupFilter;
+                const matchesSupplier = !supplierFilter || supplier === supplierFilter;
+
+                if (matchesStatus && matchesGroup && matchesSupplier) {
+                    row.style.display = ""; // Show row
+                    hasVisibleRow = true; // At least one row is visible
+                } else {
+                    row.style.display = "none"; // Hide row
+                }
+            });
+
+            // Show or hide the entire block based on rows' visibility
+            if (hasVisibleRow) {
+                header.style.display = ""; // Show header
+                header.nextElementSibling.style.display = ""; // Show associated table
+            } else {
+                header.style.display = "none"; // Hide header
+                header.nextElementSibling.style.display = "none"; // Hide associated table
+            }
+        });
+    }
+
+
+    function clearFilters() {
+        // Reset all filter inputs
+        const filterForm = document.getElementById("filterForm");
+        const inputs = filterForm.querySelectorAll("select");
+        inputs.forEach(input => {
+            input.value = ""; // Reset value to default
+        });
+
+        // Reapply filters with cleared inputs
+        applyFilters();
+    }
+</script>
+
+<script>
+    function updateDownloadLinks() {
+      var csv  = document.getElementById("downloadCsv");
+      var xlsx = document.getElementById("downloadXlsx");
+      if (!csv || !xlsx) return;
+
+      // use the server-rendered bases (no hard-coded /{{ obfuscated_id }}/…)
+      var baseCsv  = csv.getAttribute("data-base")  || csv.href.split("?")[0];
+      var baseXlsx = xlsx.getAttribute("data-base") || xlsx.href.split("?")[0];
+
+      var params = new URLSearchParams();
+      var s = document.getElementById("statusFilter")?.value;
+      var g = document.getElementById("groupFilter")?.value;
+      var sup = document.getElementById("supplierFilter")?.value;
+
+      if (s)   params.set("status", s);
+      if (g)   params.set("group", g);
+      if (sup) params.set("supplier", sup);
+
+      params.set("view", "onscreen");
+
+      var qs = params.toString();
+      csv.href  = qs ? baseCsv  + "?" + qs : baseCsv;
+      xlsx.href = qs ? baseXlsx + "?" + qs : baseXlsx;
+    }
+
+    ["statusFilter","groupFilter","supplierFilter"].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el) el.addEventListener("change", updateDownloadLinks);
     });
-}
-
-
-function clearFilters() {
-    // Reset all filter inputs
-    const filterForm = document.getElementById("filterForm");
-    const inputs = filterForm.querySelectorAll("select");
-    inputs.forEach(input => {
-        input.value = ""; // Reset value to default
-    });
-
-    // Reapply filters with cleared inputs
-    applyFilters();
-}
+    window.addEventListener("load", updateDownloadLinks);
 
 </script>
 
-
-
+<script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
+<script src="https://maxcdn.bootstrapcdn.com/bootstrap/3.4.1/js/bootstrap.min.js"></script>
 </body>
 </html>

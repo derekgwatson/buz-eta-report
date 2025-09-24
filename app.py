@@ -1,209 +1,246 @@
+import io
 import os
-from services.database import get_db, query_db, execute_query
-from werkzeug.exceptions import HTTPException
-from dotenv import load_dotenv
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, g, send_from_directory
-from flask_login import current_user
-import secrets
-from services.eta_report import build_eta_report_context
-from authlib.integrations.flask_client import OAuth
-from flask_login import LoginManager, UserMixin, login_user, logout_user, login_required
-from datetime import timedelta
-from services.update_status_mapping import get_status_mapping, get_status_mappings, edit_status_mapping, \
-    populate_status_mapping_table
+import uuid
+import logging
 import logging.config
+import atexit
+from datetime import timedelta
 from functools import wraps
-from flask import abort
+
+from dotenv import load_dotenv, find_dotenv
+from flask import (
+    Flask,
+    abort,
+    jsonify,
+    redirect,
+    render_template,
+    request,
+    send_file,
+    send_from_directory,
+    url_for,
+    g,
+)
+from flask_login import (
+    LoginManager,
+    UserMixin,
+    current_user,
+    login_required,
+    login_user,
+    logout_user,
+)
+from authlib.integrations.flask_client import OAuth
 from flask_wtf.csrf import CSRFProtect
+from concurrent.futures import ThreadPoolExecutor
+import requests
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
-from services.database import create_db_tables
-from concurrent.futures import ThreadPoolExecutor
+from services.update_status_mapping import get_status_mapping, edit_status_mapping, get_status_mappings
+
+from services.database import (
+    get_db,
+    query_db,
+    execute_query,
+    create_db_tables,
+)
+from services.migrations import run_migrations
+from services.eta_report import build_eta_report_context
+from services.buz_data import get_data_by_order_no, get_open_orders, get_open_orders_by_group
 from services.job_service import create_job, update_job, get_job
-import uuid
-import atexit
-import requests
-from services.buz_data import get_data_by_order_no
-
-
-# Load environment variables from .env
-load_dotenv()
-
-# Initialize Sentry
-sentry_sdk.init(
-    dsn=os.getenv("SENTRY_DSN"),  # Replace this with your DSN URL or use an environment variable
-    integrations=[FlaskIntegration()],
-    traces_sample_rate=1.0,  # Adjust sampling rate if needed
-    environment=os.getenv("FLASK_ENV", "development"),  # Set to "production" in production
-    send_default_pii=True  # Enable personal identifiable information for better logs
+from services.export import (
+    fetch_report_rows_and_name,
+    apply_filters,
+    ordered_headers,
+    safe_base_filename,
+    to_csv_bytes,
+    to_excel_bytes,
 )
-
-# Initialize Flask app
-app = Flask(__name__)
-app.secret_key = os.getenv("FLASK_SECRET")
-app.executor = ThreadPoolExecutor(max_workers=2)
-
-# Set app configurations
-app.permanent_session_lifetime = timedelta(minutes=30)
-
-csrf = CSRFProtect(app)
-
-# Set up logging
-LOGGING_CONFIG = {
-    'version': 1,
-    'formatters': {
-        'default': {
-            'format': '[%(asctime)s] %(levelname)s in %(module)s: %(message)s',
-        },
-    },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'default',
-        },
-    },
-    'root': {
-        'level': 'INFO',
-        'handlers': ['console'],
-    },
-}
-
-if os.getenv("ENV") == "production":
-    app.config['SESSION_COOKIE_SECURE'] = True  # Use HTTPS (enable in production)
-    app.config['SESSION_COOKIE_HTTPONLY'] = True  # Prevent JavaScript access to cookies
-    app.config['SESSION_COOKIE_SAMESITE'] = 'Lax'  # Mitigate CSRF risks
-    app.config['REMEMBER_COOKIE_DURATION'] = timedelta(minutes=60)  # Session length
+import click
 
 
-logging.config.dictConfig(LOGGING_CONFIG)
+# ---------- env ----------
+load_dotenv(find_dotenv())
 
-# Initialize OAuth and LoginManager
-oauth = OAuth(app)
+# ---------- globals ----------
+oauth = OAuth()
 login_manager = LoginManager()
-login_manager.init_app(app)
-login_manager.login_view = "login" # Set the default login view
-
-# Customize messages (optional)
-login_manager.login_message = "Please log in to access this page."
-login_manager.login_message_category = "error"
 
 
-def _make_executor():
-    return ThreadPoolExecutor(max_workers=2)
-
-
-def get_executor():
-    ex = getattr(app, "executor", None)
-    if ex is None:
-        ex = _make_executor()
-        app.executor = ex
-    return ex
-
-
-@atexit.register
-def _shutdown_executor():
-    ex = getattr(app, "executor", None)
-    if ex:
-        try:
-            ex.shutdown(wait=False, cancel_futures=True)  # py3.9+
-        except TypeError:
-            ex.shutdown(wait=False)
-
-
-# Close the database connection when the app context is destroyed
-@app.teardown_appcontext
-def close_db(exception):
-    db = g.pop('db', None)
-    if db:
-        db.close()
-
-
-# Handle unauthorized access by redirecting to login
-@login_manager.unauthorized_handler
-def handle_unauthorized():
-    app.logger.warning("Unauthorized access attempt.")
-    return redirect(url_for("login"))
-
-
-@app.cli.command("init-db")
-def initialize_database():
-    """Initialize the database tables."""
-    create_db_tables()
-    print("Database initialized.")
-
-
-# Initialize the database when the app starts
-google = oauth.register(
-    name="google",
-    client_id=os.getenv("GOOGLE_CLIENT_ID"),
-    client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
-    access_token_url="https://oauth2.googleapis.com/token",
-    authorize_url="https://accounts.google.com/o/oauth2/auth",
-    api_base_url="https://www.googleapis.com/oauth2/v1/",
-    userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
-    jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
-    client_kwargs={
-        "scope": "openid email profile",
-        "token_endpoint_auth_method": "client_secret_post",
-        "prompt": "consent"
-    }
-)
-
-
-# Mock User class for simplicity
 class User(UserMixin):
-    def __init__(self, id_, name, email, role):
+    def __init__(self, id_: int, name: str, email: str, role: str):
         self.id = id_
         self.name = name
         self.email = email
         self.role = role
 
 
-@app.route("/login")
-def login():
-    return google.authorize_redirect(url_for("callback", _external=True))
+def _configure_logging(app: Flask) -> None:
+    root = logging.getLogger()
+    root.handlers[:] = []
+    root.setLevel(app.config.get("LOG_LEVEL", "INFO"))
+    handler = logging.StreamHandler()
+    handler.setLevel(app.config.get("LOG_LEVEL", "INFO"))
+    fmt = "%(asctime)s %(levelname)s %(name)s: %(message)s"
+    handler.setFormatter(logging.Formatter(fmt))
+    root.addHandler(handler)
+    app.logger.setLevel(app.config.get("LOG_LEVEL", "INFO"))
 
 
+def create_app() -> tuple[Flask, str]:
+    app = Flask(__name__, instance_relative_config=True)
+
+    # Database location under instance/
+    db_env = os.getenv("DATABASE_PATH", "customers.db")
+    db_path = db_env if os.path.isabs(db_env) else os.path.join(app.instance_path, db_env)
+    os.makedirs(os.path.dirname(db_path), exist_ok=True)
+    app.config["DATABASE"] = db_path
+
+    env = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "production").lower()
+    if env == "development":
+        from config import DevConfig as Cfg
+    elif env == "production":
+        from config import ProdConfig as Cfg
+    else:
+        raise RuntimeError(f"Unknown APP_ENV/FLASK_ENV value: {env!r}")
+
+    app.config.from_object(Cfg)
+    _configure_logging(app)
+
+    app.secret_key = os.getenv("FLASK_SECRET")
+    app.permanent_session_lifetime = timedelta(minutes=30)
+
+    # Cookies in production
+    if env == "production":
+        app.config["SESSION_COOKIE_SECURE"] = True
+        app.config["SESSION_COOKIE_HTTPONLY"] = True
+        app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+        app.config["REMEMBER_COOKIE_DURATION"] = timedelta(minutes=60)
+
+    # CSRF, OAuth, Login manager
+    CSRFProtect(app)
+    oauth.init_app(app)
+    login_manager.init_app(app)
+    login_manager.login_view = "login"
+    login_manager.login_message = "Please log in to access this page."
+    login_manager.login_message_category = "error"
+
+    # Register Google OAuth client
+    oauth.register(
+        name="google",
+        client_id=os.getenv("GOOGLE_CLIENT_ID"),
+        client_secret=os.getenv("GOOGLE_CLIENT_SECRET"),
+        access_token_url="https://oauth2.googleapis.com/token",
+        authorize_url="https://accounts.google.com/o/oauth2/auth",
+        api_base_url="https://www.googleapis.com/oauth2/v1/",
+        userinfo_endpoint="https://openidconnect.googleapis.com/v1/userinfo",
+        jwks_uri="https://www.googleapis.com/oauth2/v3/certs",
+        client_kwargs={
+            "scope": "openid email profile",
+            "token_endpoint_auth_method": "client_secret_post",
+            "prompt": "consent",
+        },
+    )
+
+    # Background executor
+    app.executor = ThreadPoolExecutor(max_workers=2)
+
+    @atexit.register
+    def _shutdown_executor():
+        ex = getattr(app, "executor", None)
+        if ex:
+            try:
+                ex.shutdown(wait=False, cancel_futures=True)
+            except TypeError:
+                ex.shutdown(wait=False)
+
+    # DB migrations
+    with app.app_context():
+        conn = get_db()
+        run_migrations(conn, make_backup=True, logger=app.logger)
+
+    # Close DB per request
+    @app.teardown_appcontext
+    def close_db(_exc):
+        db = g.pop("db", None)
+        if db:
+            db.close()
+
+    return app, env
+
+
+app, ENV = create_app()
+
+# ---------- Sentry ----------
+sentry_sdk.init(
+    dsn=os.getenv("SENTRY_DSN"),
+    integrations=[FlaskIntegration()],
+    traces_sample_rate=1.0,
+    environment=ENV,
+    send_default_pii=True,
+)
+
+# ---------- helpers ----------
 def role_required(*required_roles):
     def decorator(f):
         @wraps(f)
         def wrapped(*args, **kwargs):
             if not current_user.is_authenticated or current_user.role not in required_roles:
-                abort(403)  # Forbidden access
+                abort(403)
             return f(*args, **kwargs)
         return wrapped
     return decorator
 
 
+def get_executor() -> ThreadPoolExecutor:
+    ex = getattr(app, "executor", None)
+    if ex is None:
+        ex = ThreadPoolExecutor(max_workers=2)
+        app.executor = ex
+    return ex
+
+
+@login_manager.unauthorized_handler
+def handle_unauthorized():
+    app.logger.warning("Unauthorized access attempt.")
+    return redirect(url_for("login"))
+
+
+@login_manager.user_loader
+def load_user(user_id):
+    row = query_db("SELECT id, email, name, role, active FROM users WHERE id = ?", (user_id,), one=True)
+    if row and row[4]:
+        return User(id_=row[0], name=row[2], email=row[1], role=row[3])
+    return None
+
+
+# ---------- Auth routes ----------
+@app.route("/login")
+def login():
+    # Use external URL; configured redirect URI must match in Google console
+    return oauth.google.authorize_redirect(url_for("callback", _external=True))
+
+
 @app.route("/callback")
 def callback():
-    token = google.authorize_access_token()
-
-    if not token or token.get('expires_in', 0) <= 0:
-        print("Token expired or missing, redirecting to login.")
+    token = oauth.google.authorize_access_token()
+    if not token or token.get("expires_in", 0) <= 0:
         return redirect(url_for("login"))
 
-    user_info = google.get("userinfo").json()
-    user_email = user_info.get("email")
-
-    if not user_email:
-        flash("Login failed: No email found.", "error")
+    user_info = oauth.google.get("userinfo").json()
+    email = user_info.get("email")
+    if not email:
         return redirect(url_for("login"))
 
-    # Query database for user
-    user_data = query_db(
+    row = query_db(
         "SELECT id, email, name, role, active FROM users WHERE email = ?",
-        (user_email,), one=True, logger=app.logger
+        (email,),
+        one=True,
+        logger=app.logger,
     )
+    if not row or not row[4]:
+        return render_template("403.html"), 403
 
-    if not user_data or not user_data[4]:  # Check if user exists and is active
-        flash("Access denied: Unauthorized user.", "error")
-        return render_template('403.html'), 403
-
-    # Log the user in
-    user = User(id_=user_data[0], name=user_data[2], email=user_data[1], role=user_data[3])
+    user = User(id_=row[0], name=row[2], email=row[1], role=row[3])
     login_user(user)
-
     return redirect(url_for("admin"))
 
 
@@ -211,63 +248,73 @@ def callback():
 @login_required
 def logout():
     logout_user()
-    return render_template('home.html')
+    return render_template("home.html")
 
 
-@app.route('/')
+# ---------- Core pages ----------
+@app.route("/")
 def home():
-    return render_template('home.html')
+    return render_template("home.html")
 
 
-@app.route('/admin', methods=['GET', 'POST'])
+@app.route("/admin", methods=["GET", "POST"])
 @login_required
-@role_required('admin', 'user')  # Allow both roles
+@role_required("admin", "user")
 def admin():
-    if request.method == 'POST':
-        dd_name = request.form['dd_name']
-        cbr_name = request.form['cbr_name']
-        obfuscated_id = secrets.token_urlsafe(30)
-        field_type = request.form['field_type']
-        print(f"Generated Token: {obfuscated_id}")
-        print(f"Length of Token: {len(obfuscated_id)}")
+    def _debug_db_snapshot():
+        conn = get_db()
+        dbs = conn.execute("PRAGMA database_list").fetchall()
+        cust_count = conn.execute("SELECT COUNT(*) FROM customers").fetchone()[0]
+        cols = conn.execute("PRAGMA table_info(customers)").fetchall()
+        return {
+            "attached_dbs": dbs,
+            "customers_count": cust_count,
+            "customers_columns": [c[1] for c in cols],
+        }
 
-        # Insert customer into the database
+    app.logger.debug(_debug_db_snapshot())
+
+    if request.method == "POST":
+        dd_name = request.form["dd_name"]
+        cbr_name = request.form["cbr_name"]
+        field_type = request.form["field_type"]
+        obfuscated_id = uuid.uuid4().hex
+
         query_db(
-            "INSERT INTO customers (dd_name, cbr_name, obfuscated_id, field_type) VALUES (?, ?, ?, ?)",
-            (dd_name, cbr_name, obfuscated_id, field_type), logger=app.logger
+            "INSERT INTO customers (dd_name, cbr_name, obfuscated_id, field_type) "
+            "VALUES (?, ?, ?, ?)",
+            (dd_name, cbr_name, obfuscated_id, field_type),
+            logger=app.logger,
         )
-        return redirect(url_for('admin'))
+        return redirect(url_for("admin"))
 
-    # Retrieve all customers from the database
     customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id, field_type FROM customers")
-    # Sort using the combined name logic
-    sorted_customers = sorted(
-        customers,
-        key=lambda c: (c[1] or c[2] or "").lower()
-    )
-    if customers:
-        return render_template('admin.html', customers=sorted_customers)
-    return render_template('admin.html')
+    try:
+        sorted_customers = sorted(customers, key=lambda c: ((c["dd_name"] or c["cbr_name"] or "").lower()))
+    except (TypeError, KeyError):
+        sorted_customers = sorted(customers, key=lambda c: ((c[1] or c[2] or "").lower()))
+
+    return render_template("admin.html", customers=sorted_customers)
 
 
-@app.route('/etas/<code>')
-def eta_report_redirect(code):
-    # Redirect to the new URL format
-    return redirect(url_for('eta_report', obfuscated_id=code), code=301)
+# ---------- ETA async render flow ----------
+@app.route("/sync/<obfuscated_id>")
+def eta_report_sync(obfuscated_id: str):
+    # In-request: get_db() binds to g.db; teardown will close it.
+    db = get_db()
+    try:
+        template, context, status = build_eta_report_context(obfuscated_id, db=db)
+        return render_template(template, **context), status
+    except requests.exceptions.RequestException as exc:
+        msg = f"Failed to generate report: {exc}"
+        return render_template("500.html", message=msg), 500
 
 
-def _run_eta_report_job(job_id: str, obfuscated_id: str):
-    """
-    Runs outside request context in a thread.
-    Must open/close its own DB connection via get_db() (your get_db handles no-app-context).
-    Stores render payload in jobs.result as JSON: {"template": "...", "context": {...}}
-    """
-    db = get_db()  # your get_db() already returns a standalone conn when no app context
+def _run_eta_report_job(job_id: str, obfuscated_id: str) -> None:
+    db = get_db()
     try:
         update_job(job_id, pct=5, message="Loading customer…", db=db)
         template, context, status = build_eta_report_context(obfuscated_id, db=db)
-
-        # If not found or error, still complete with the 404/500 template payload
         update_job(
             job_id,
             pct=100,
@@ -276,8 +323,8 @@ def _run_eta_report_job(job_id: str, obfuscated_id: str):
             done=True,
             db=db,
         )
-    except Exception as e:
-        update_job(job_id, error=str(e), message="Job failed", db=db)
+    except Exception as exc:
+        update_job(job_id, error=str(exc), message="Job failed", db=db)
         raise
     finally:
         try:
@@ -287,22 +334,16 @@ def _run_eta_report_job(job_id: str, obfuscated_id: str):
 
 
 @app.route("/<obfuscated_id>")
-def eta_report(obfuscated_id):
-    _ = get_db()  # ensures g.db exists this request (harmless if not used)
-
-    # Create a job row using request's g.db
+def eta_report(obfuscated_id: str):
+    _ = get_db()  # ensure g.db bound
     job_id = str(uuid.uuid4())
-    create_job(job_id)  # uses g.db inside request context
-
-    # Kick the background worker
+    create_job(job_id)  # uses g.db
     get_executor().submit(_run_eta_report_job, job_id, obfuscated_id)
-
-    # Render a lightweight page that polls /jobs/<job_id> and swaps in the final report
     return render_template("report_loading.html", job_id=job_id)
 
 
 @app.get("/jobs/<job_id>")
-def job_status(job_id):
+def job_status(job_id: str):
     data = get_job(job_id)
     if not data:
         return jsonify({"error": "not found"}), 404
@@ -310,291 +351,279 @@ def job_status(job_id):
 
 
 @app.get("/report/<job_id>")
-def report_render(job_id):
-    data = get_job(job_id)
-    if not data or data.get("status") != "completed":
-        return render_template("404.html", message="Report not ready or missing"), 404
-
-    result = data.get("result") or {}
-    template = result.get("template") or "report.html"
-    context = result.get("context") or {}
-    status = result.get("status") or 200
-    return render_template(template, **context), status
-
-
-@app.route('/delete/<int:customer_id>')
-@login_required
-@role_required('admin', 'user')  # Allow both roles
-def delete_customer(customer_id):
-    query_db("DELETE FROM customers WHERE id = ?", (customer_id,))
-    return redirect(url_for('admin'))
-
-
-@app.route('/edit/<int:customer_id>', methods=['GET', 'POST'])
-@login_required
-@role_required('admin', 'user')  # Allow both roles
-def edit_customer(customer_id):
-    if request.method == 'POST':
-        # Fetch updated form data
-        dd_name = request.form['dd_name']
-        cbr_name = request.form['cbr_name']
-
-        # Update the customer in the database
-        query_db(
-            "UPDATE customers SET cbr_name = ?, dd_name = ? WHERE id = ?",
-            (cbr_name, dd_name, customer_id),
-        )
-        return redirect(url_for('admin'))
-
-    # Fetch customer details for pre-filling the form
-    customer = query_db(
-        "SELECT id, dd_name, cbr_name, field_type FROM customers WHERE id = ?", (customer_id,), one=True
-    )
-    if not customer:
-        return "Customer not found", 404
-
-    return render_template('edit.html', customer=customer)
-
-
-@app.route('/jobs-schedule/<order_no>', methods=['GET'])
-@login_required
-def jobs_schedule(order_no):
-    """Route to fetch JobsScheduleDetails for a given order number."""
+def report_render(job_id: str):
     try:
-        # Call the function to get the data
-        data = get_data_by_order_no(order_no, "JobsScheduleDetailed", "DD")
-        return jsonify(data)
+        data = get_job(job_id)
+        if not data or data.get("status") != "completed":
+            return render_template("404.html", message="Report not ready or missing"), 404
 
-    except requests.exceptions.RequestException as e:
-        # Handle the error based on the environment
-        if app.debug:
-            # In non-production environments, raise the exception for debugging
-            raise e
-        else:
-            return jsonify({"error": f"Failed to fetch JobsScheduleDetails: {str(e)}"}), 500
+        result = data.get("result") or {}
+        template = result.get("template") or "report.html"
+        context = result.get("context") or {}
+        status = result.get("status") or 200
+        return render_template(template, **context), status
+    except requests.exceptions.RequestException as exc:
+        # No obfuscated_id in scope here; show a generic 500 page.
+        msg = f"Failed to generate report: {exc}"
+        return render_template("500.html", message=msg), 500
 
 
-@app.route('/wip/<order_no>', methods=['GET'])
+# ---------- Data lookups ----------
+@app.route("/jobs-schedule/<instance>/<order_no>")
 @login_required
-def work_in_progress(order_no):
-    """Route to fetch WorkInProgress for a given order number."""
+def jobs_schedule(instance: str, order_no: str):
+    instance = (instance or "").upper()
+    if instance not in {"DD", "CBR"}:
+        return jsonify({"error": "Invalid instance. Use 'DD' or 'CBR'."}), 400
     try:
-        data = get_data_by_order_no(order_no, "WorkInProgress")
-        return jsonify(data)
-
-    except requests.exceptions.RequestException as e:
-        # Handle the error based on the environment
+        result = get_data_by_order_no(order_no, "JobsScheduleDetailed", instance)
+        return jsonify(result)
+    except requests.exceptions.RequestException as exc:
         if app.debug:
-            # In non-production environments, raise the exception for debugging
-            raise e
-        else:
-            return jsonify({"error": f"Failed to fetch WorkInProgress: {str(e)}"}), 500
+            raise
+        return jsonify({"error": f"Failed to fetch JobsScheduleDetailed: {exc}"}), 500
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
 
 
-@app.route('/status_mapping')
+@app.route("/wip/<instance>/<order_no>")
 @login_required
-@role_required('admin', 'user')  # Allow both roles
+def work_in_progress(instance: str, order_no: str):
+    instance = (instance or "").upper()
+    if instance not in {"DD", "CBR"}:
+        return jsonify({"error": "Invalid instance. Use 'DD' or 'CBR'."}), 400
+    try:
+        result = get_data_by_order_no(order_no, "WorkInProgress", instance)
+        return jsonify(result)
+    except requests.exceptions.RequestException as exc:
+        if app.debug:
+            raise
+        return jsonify({"error": f"Failed to fetch WorkInProgress: {exc}"}), 500
+    except RuntimeError as exc:
+        return jsonify({"error": str(exc)}), 503
+
+
+# ---------- Status mapping ----------
+@app.route("/status_mapping")
+@login_required
+@role_required("admin", "user")
 def list_status_mappings():
     mappings = get_status_mappings(conn=get_db())
-    return render_template('status_mappings.html', mappings=mappings)
+    return render_template("status_mappings.html", mappings=mappings)
 
 
-# Error Handlers
-@app.route('/status_mapping/edit/<int:mapping_id>', methods=['GET', 'POST'])
-@role_required('admin', 'user')  # Allow both roles
-def edit_status_mapping_route(mapping_id):
-    if request.method == 'POST':
-        custom_status = request.form['custom_status']
-        active = 'active' in request.form
+@app.route("/status_mapping/edit/<int:mapping_id>", methods=["GET", "POST"])
+@login_required
+@role_required("admin", "user")
+def edit_status_mapping_route(mapping_id: int):
+    if request.method == "POST":
+        custom_status = request.form["custom_status"]
+        active = "active" in request.form
         edit_status_mapping(mapping_id, custom_status, active, conn=get_db())
-        return redirect(url_for('list_status_mappings'))
+        return redirect(url_for("list_status_mappings"))
 
     mapping = get_status_mapping(mapping_id=mapping_id, conn=get_db())
-    return render_template('edit_status_mapping.html', mapping=mapping)
+    return render_template("edit_status_mapping.html", mapping=mapping)
 
 
-@app.route('/refresh_statuses', methods=['POST'])
-@role_required('admin')  # Allow both roles
+@app.route("/refresh_statuses", methods=["POST"])
+@login_required
+@role_required("admin")
 def refresh_statuses():
     try:
-        # Call the function to refresh statuses
         populate_status_mapping_table(get_db())
-        flash("Statuses refreshed successfully.", "success")
-    except Exception as e:
+        # flash works if template shows flashes
+        # flash("Statuses refreshed successfully.", "success")
+    except Exception as exc:
         if app.debug:
-            raise e
-        else:
-            flash(f"Failed to refresh statuses: {e}", "danger")
-
-    # Redirect back to the edit page
-    return redirect(url_for('list_status_mappings'))
+            raise
+        # flash(f"Failed to refresh statuses: {exc}", "danger")
+    return redirect(url_for("list_status_mappings"))
 
 
-@app.errorhandler(HTTPException)
-def handle_http_exception(e):
-    """Handle specific HTTP errors with custom pages or fall back to a generic page."""
-    app.logger.error(f"HTTP Error {e.code}: {e.description}")
+# ---------- Downloads (CSV/XLSX) ----------
+def _group_data_only(conn, group, instance):
+    res = get_open_orders_by_group(conn, group, instance)
+    return res["data"] if isinstance(res, dict) else (res or [])
 
-    # Optionally log this error to Sentry or another monitoring tool
-    sentry_sdk.capture_exception(e)
 
-    # Check if a specific error page exists for the given code
-    if e.code in {401, 403, 404, 405, 429, 500}:
-        template_name = f"{e.code}.html"
+def _customer_data_only(conn, customer, instance):
+    res = get_open_orders(conn, customer, instance)
+    return res["data"] if isinstance(res, dict) else (res or [])
+
+
+@app.route("/<obfuscated_id>/download.<fmt>")
+def download_orders(obfuscated_id: str, fmt: str):
+    rows, customer_name = fetch_report_rows_and_name(
+        obfuscated_id,
+        query_db=query_db,
+        get_db=get_db,
+        get_open_orders=_customer_data_only,
+        get_open_orders_by_group=_group_data_only,
+    )
+    if rows is None:
+        return render_template("404.html", message="Report not found"), 404
+
+    rows = apply_filters(
+        rows,
+        status=request.args.get("status") or request.args.get("statusFilter"),
+        group=request.args.get("group") or request.args.get("groupFilter"),
+        supplier=request.args.get("supplier") or request.args.get("supplierFilter"),
+    )
+    headers = ordered_headers(rows)
+
+    if fmt == "xlsx":
+        data = to_excel_bytes(rows, headers)
+        mimetype = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    elif fmt == "csv":
+        data = to_csv_bytes(rows, headers)
+        mimetype = "text/csv"
     else:
-        template_name = "error.html"
+        return render_template("400.html", message=f"Unrecognised format: {fmt}"), 400
 
-    if app.debug:
-        raise e
-    else:
-        # Render the template with the provided error details
-        return render_template(template_name, code=e.code, message=e.description), e.code
-
-
-@app.errorhandler(Exception)
-def handle_exception(e):
-    """Handle unexpected errors like database failures or crashes."""
-    app.logger.error(f"Unexpected Server Error: {e}")
-
-    # Optionally log this error to Sentry or another monitoring tool
-    sentry_sdk.capture_exception(e)
-
-    if app.debug:
-        raise e
-    else:
-        # Fall back to a generic error page with a 500 status code
-        return render_template(
-            "error.html",
-            code=500,
-            message=str(e) or "An unexpected server error occurred."
-        ), 500
+    return send_file(
+        io.BytesIO(data),
+        mimetype=mimetype,
+        as_attachment=True,
+        download_name=safe_base_filename(customer_name or obfuscated_id) + "." + fmt,
+    )
 
 
-@app.route('/manage_users')
+# ---------- Users admin ----------
+@app.route("/manage_users")
 @login_required
-@role_required('admin')
+@role_required("admin")
 def manage_users():
     users = query_db("SELECT id, email, name, role, active FROM users")
-    return render_template('manage_users.html', users=users)
+    return render_template("manage_users.html", users=users)
 
 
-@app.route('/add_user', methods=['POST'])
+@app.route("/add_user", methods=["POST"])
 @login_required
-@role_required('admin')
+@role_required("admin")
 def add_user():
-    email = request.form['email']
-    name = request.form['name']
-    role = request.form['role']
-
+    email = request.form["email"]
+    name = request.form["name"]
+    role = request.form["role"]
     try:
         execute_query(
             "INSERT INTO users (email, name, role) VALUES (?, ?, ?)",
-            (email, name, role)
+            (email, name, role),
         )
-        flash("User added successfully.", "success")
+        # flash("User added successfully.", "success")
     except ValueError:
-        flash("Email already exists.", "danger")
+        # flash("Email already exists.", "danger")
+        pass
+    return redirect(url_for("manage_users"))
 
-    return redirect(url_for('manage_users'))
 
-
-@app.route('/edit_user/<int:user_id>', methods=['GET', 'POST'])
+@app.route("/edit_user/<int:user_id>", methods=["GET", "POST"])
 @login_required
-@role_required('admin')
-def edit_user(user_id):
-    if request.method == 'POST':
-        email = request.form['email']
-        name = request.form['name']
-        role = request.form['role']
-
+@role_required("admin")
+def edit_user(user_id: int):
+    if request.method == "POST":
+        email = request.form["email"]
+        name = request.form["name"]
+        role = request.form["role"]
         query_db(
             "UPDATE users SET email = ?, name = ?, role = ? WHERE id = ?",
-            (email, name, role, user_id)
+            (email, name, role, user_id),
         )
+        return redirect(url_for("manage_users"))
 
-        flash("User updated successfully.", "success")
-        return redirect(url_for('manage_users'))
-
-    # Pre-fill form for editing
     user = query_db("SELECT id, email, name, role FROM users WHERE id = ?", (user_id,), one=True)
-
-    if user:
-        user = dict(user)
-    else:
-        flash("User not found.", "danger")
-        return redirect(url_for('manage_users'))
-
-    return render_template('edit_user.html', user=user)
-
-
-@app.route('/toggle_user_status/<int:user_id>')
-@login_required
-@role_required('admin')
-def toggle_user_status(user_id):
-    user = query_db("SELECT active FROM users WHERE id = ?", (user_id,), one=True)
-
     if not user:
-        flash("User not found.", "danger")
-        return redirect(url_for('manage_users'))
+        # flash("User not found.", "danger")
+        return redirect(url_for("manage_users"))
+    return render_template("edit_user.html", user=dict(user))
+
+
+@app.route("/toggle_user_status/<int:user_id>")
+@login_required
+@role_required("admin")
+def toggle_user_status(user_id: int):
+    user = query_db("SELECT active FROM users WHERE id = ?", (user_id,), one=True)
+    if not user:
+        # flash("User not found.", "danger")
+        return redirect(url_for("manage_users"))
 
     new_status = 0 if user[0] == 1 else 1
     query_db("UPDATE users SET active = ? WHERE id = ?", (new_status, user_id))
-
-    flash("User status updated successfully.", "success")
-    return redirect(url_for('manage_users'))
+    return redirect(url_for("manage_users"))
 
 
-@app.route('/delete_user/<int:user_id>')
+@app.route("/delete_user/<int:user_id>")
 @login_required
-@role_required('admin')
-def delete_user(user_id):
+@role_required("admin")
+def delete_user(user_id: int):
     query_db("DELETE FROM users WHERE id = ?", (user_id,))
-
-    flash("User deleted successfully.", "success")
-    return redirect(url_for('manage_users'))
+    return redirect(url_for("manage_users"))
 
 
-@login_manager.user_loader
-def load_user(user_id):
-    user_data = query_db("SELECT id, email, name, role, active FROM users WHERE id = ?", (user_id,), one=True)
-
-    if user_data and user_data[4]:  # Ensure user exists and is active
-        return User(id_=user_data[0], name=user_data[2], email=user_data[1], role=user_data[3])
-    return None
-
-
-@app.route('/sentry-debug')
+# ---------- misc ----------
+@app.route("/sentry-debug")
 def trigger_error():
-    division_by_zero = 1 / 0
+    _ = 1 / 0
+    return "ok"
 
 
-# Route for favicon.ico
-@app.route('/favicon.ico')
+@app.route("/favicon.ico")
 def favicon():
-    return send_from_directory(
-        app.static_folder, 'favicon.ico', mimetype='image/vnd.microsoft.icon'
-    )
+    return send_from_directory(app.static_folder, "favicon.ico", mimetype="image/vnd.microsoft.icon")
 
 
-@app.route('/robots.txt')
+@app.route("/robots.txt")
 def robots_txt():
-    return send_from_directory(app.static_folder, 'robots.txt')
+    return send_from_directory(app.static_folder, "robots.txt")
 
 
-# Required Environment Variables
-REQUIRED_ENV_VARS = [
-    "BUZ_DD_USERNAME", "BUZ_DD_PASSWORD",
-    "BUZ_CBR_USERNAME", "BUZ_CBR_PASSWORD",
-    "FLASK_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET",
-    "GOOGLE_REDIRECT_URI", "DATABASE_PATH", "SERVER_NAME", "SENTRY_DSN"
-]
-
-# Validate Environment Variables
-missing_vars = [var for var in REQUIRED_ENV_VARS if not os.getenv(var)]
-
-if missing_vars:
-    raise RuntimeError(f"Missing required environment variables: {', '.join(missing_vars)}")
+# ---------- CLI ----------
+@app.cli.command("init-db")
+def initialize_database():
+    """Initialize the database tables."""
+    conn = get_db()
+    run_migrations(conn, make_backup=True, logger=app.logger)  # customers table + versioning
+    create_db_tables(conn=conn)  # users/status_mapping/jobs
+    print("Database ready.")
 
 
-if __name__ == '__main__':
+@app.cli.command("prewarm-cache")
+@click.option("--instance", "instances", multiple=True, default=["DD", "CBR"], help="Instances to warm")
+def prewarm_cache(instances):
+    """
+    Warm cache for all configured customers/groups.
+    Safe to run anytime; best a few minutes before blackout.
+    """
+    conn = get_db()
+    customers = query_db("SELECT dd_name, cbr_name, field_type FROM customers", one=False)
+    total = 0
+    for row in customers or []:
+        dd, cbr, ftype = row[0], row[1], row[2]
+        for inst in instances:
+            name = dd if inst == "DD" else cbr
+            if not name:
+                continue
+            if ftype == "Customer Group":
+                res = get_open_orders_by_group(conn, name, inst)
+            else:
+                res = get_open_orders(conn, name, inst)
+            data = res["data"] if isinstance(res, dict) else (res or [])
+            src = res.get("source", "live") if isinstance(res, dict) else "live"
+            click.echo(f"[{inst}] {ftype}: {name} → warmed {len(data)} rows (source={src})")
+            total += 1
+    click.echo(f"Done. Warmed {total} entries.")
+
+
+# ---------- env validation ----------
+REQ_ALWAYS = ["FLASK_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DATABASE_PATH"]
+REQ_PROD = ["SERVER_NAME"]  # SENTRY_DSN optional; don’t block startup
+
+_missing = [v for v in REQ_ALWAYS if not os.getenv(v)]
+if ENV == "production":
+    _missing += [v for v in REQ_PROD if not os.getenv(v)]
+if _missing:
+    raise RuntimeError(f"Missing required environment variables: {', '.join(sorted(set(_missing)))}")
+
+
+if __name__ == "__main__":
     app.run(debug=True)
