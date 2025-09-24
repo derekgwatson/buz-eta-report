@@ -11,49 +11,41 @@ def _raise_in_dev() -> bool:
     )
 
 
+# services/database.py
+import os
+from flask import current_app, has_app_context
+
+
 def _resolve_db_path():
-    # Prefer Flask config when available
-    if has_app_context() and current_app.config.get("DATABASE"):
-        return current_app.config["DATABASE"]
-    # Fallback for scripts run outside app context
+    if has_app_context():
+        name = (current_app.config.get("DATABASE")
+                or current_app.config.get("DATABASE_FILE")
+                or "customers.db")
+        # join to instance folder unless absolute
+        return name if os.path.isabs(name) else os.path.join(current_app.instance_path, name)
+    # (only for scripts run completely outside Flask)
     name = os.getenv("DATABASE_PATH", "customers.db")
-    if os.path.isabs(name):
-        return name
-    # Anchor relative fallback to this repo (project) root
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    return os.path.join(project_root, name)
+    return name if os.path.isabs(name) else os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), name)
 
 
 # Initialize the database connection using Flask's `g`
-def get_db():
-    if "db" not in g:
-        import sqlite3
-        conn = sqlite3.connect(_resolve_db_path())
-        conn.row_factory = sqlite3.Row
-        # (optional hardening)
-        conn.execute("PRAGMA foreign_keys=ON")
-        conn.execute("PRAGMA journal_mode=WAL")
-        g.db = conn
-    return g.db
-
-
 def update_status_mapping(odata_statuses, conn=None):
-    # Mark old statuses as inactive
-    execute_query('''
-    UPDATE status_mapping 
-    SET active = FALSE 
-    WHERE odata_status NOT IN (
-        SELECT odata_status FROM (VALUES {}) 
-    );
-    '''.format(', '.join(f"('{s}')" for s in odata_statuses)), conn=conn)
+    conn = conn or get_db()
+    statuses = list(dict.fromkeys(odata_statuses or []))
 
-    # Insert new or reactivate existing statuses
-    for status in odata_statuses:
-        execute_query('''
-        INSERT INTO status_mapping (odata_status, active) 
-        VALUES (?, TRUE)
-        ON CONFLICT (odata_status) DO UPDATE SET active = TRUE;
-        ''', args=(status,), conn=conn)
+    if statuses:
+        placeholders = ",".join("?" for _ in statuses)
+        conn.execute(f"UPDATE status_mapping SET active = 0 WHERE odata_status NOT IN ({placeholders})", statuses)
+    else:
+        # If nothing from OData, mark all inactive
+        conn.execute("UPDATE status_mapping SET active = 0")
+
+    conn.executemany(
+        "INSERT INTO status_mapping (odata_status, active) VALUES (?, 1) "
+        "ON CONFLICT(odata_status) DO UPDATE SET active = 1",
+        [(s,) for s in statuses]
+    )
+    conn.commit()
 
 
 def create_db_tables(conn=None):
@@ -68,26 +60,6 @@ def create_db_tables(conn=None):
     ''', conn=conn)
 
     execute_query('''
-        CREATE TABLE IF NOT EXISTS customers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            dd_name TEXT,
-            cbr_name TEXT,
-            obfuscated_id TEXT NOT NULL UNIQUE,
-            field_type TEXT
-        )
-    ''', conn=conn)
-
-    execute_query('''
-        ALTER TABLE customers (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            dd_name TEXT,
-            cbr_name TEXT,
-            obfuscated_id TEXT NOT NULL UNIQUE,
-            field_type TEXT
-        )
-    ''', conn=conn)
-
-    execute_query('''
     CREATE TABLE IF NOT EXISTS status_mapping (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         odata_status TEXT UNIQUE NOT NULL,
@@ -95,7 +67,40 @@ def create_db_tables(conn=None):
         active BOOLEAN NOT NULL DEFAULT TRUE
     );
     ''', conn=conn)
+
+    execute_query('''
+    CREATE TABLE IF NOT EXISTS jobs (
+      id TEXT PRIMARY KEY,
+      status TEXT NOT NULL,           -- running/completed/failed
+      pct INTEGER NOT NULL DEFAULT 0,
+      log TEXT NOT NULL DEFAULT '[]', -- json array of strings
+      error TEXT,
+      result TEXT,                    -- json
+      created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+      updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    ''', conn=conn)
+
     print("Database tables created successfully")
+
+
+# Initialize the database connection using Flask's `g`
+def get_db():
+    if has_app_context():
+        if 'db' not in g:
+            conn = sqlite3.connect(_resolve_db_path(), check_same_thread=False)
+            conn.row_factory = sqlite3.Row
+            conn.execute("PRAGMA foreign_keys=ON")
+            conn.execute("PRAGMA journal_mode=WAL")
+            g.db = conn
+        return g.db
+    else:
+        # Background thread, return a standalone connection
+        conn = sqlite3.connect(_resolve_db_path(), check_same_thread=False)
+        conn.row_factory = sqlite3.Row
+        conn.execute("PRAGMA foreign_keys=ON")
+        conn.execute("PRAGMA journal_mode=WAL")
+        return conn
 
 
 def query_db(query, args=(), one=False, logger=None, conn=None):

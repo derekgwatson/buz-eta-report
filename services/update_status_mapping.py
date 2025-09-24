@@ -1,7 +1,6 @@
 from services.database import execute_query
 from typing import Iterable
 from services.buz_data import get_statuses
-from services.odata_utils import odata_quote
 
 
 def update_status_mapping(odata_statuses):
