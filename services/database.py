@@ -11,17 +11,21 @@ def _raise_in_dev() -> bool:
     )
 
 
+# services/database.py
+import os
+from flask import current_app, has_app_context
+
+
 def _resolve_db_path():
-    # Prefer Flask config when available
-    if has_app_context() and current_app.config.get("DATABASE"):
-        return current_app.config["DATABASE"]
-    # Fallback for scripts run outside app context
+    if has_app_context():
+        name = (current_app.config.get("DATABASE")
+                or current_app.config.get("DATABASE_FILE")
+                or "customers.db")
+        # join to instance folder unless absolute
+        return name if os.path.isabs(name) else os.path.join(current_app.instance_path, name)
+    # (only for scripts run completely outside Flask)
     name = os.getenv("DATABASE_PATH", "customers.db")
-    if os.path.isabs(name):
-        return name
-    # Anchor relative fallback to this repo (project) root
-    project_root = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
-    return os.path.join(project_root, name)
+    return name if os.path.isabs(name) else os.path.join(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")), name)
 
 
 # Initialize the database connection using Flask's `g`

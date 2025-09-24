@@ -1,12 +1,13 @@
 import io
 import os
 import uuid
+import time
 import logging
 import logging.config
 import atexit
 from datetime import timedelta
 from functools import wraps
-
+from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 from flask import (
     Flask,
@@ -19,6 +20,7 @@ from flask import (
     send_from_directory,
     url_for,
     g,
+    current_app,
 )
 from flask_login import (
     LoginManager,
@@ -56,6 +58,12 @@ from services.export import (
 )
 import click
 
+import secrets, threading
+from services.eta_worker import run_eta_job
+
+
+STALL_TTL = 20  # seconds without updates
+
 
 # ---------- env ----------
 load_dotenv(find_dotenv())
@@ -87,12 +95,8 @@ def _configure_logging(app: Flask) -> None:
 
 def create_app() -> tuple[Flask, str]:
     app = Flask(__name__, instance_relative_config=True)
-
-    # Database location under instance/
-    db_env = os.getenv("DATABASE_PATH", "customers.db")
-    db_path = db_env if os.path.isabs(db_env) else os.path.join(app.instance_path, db_env)
-    os.makedirs(os.path.dirname(db_path), exist_ok=True)
-    app.config["DATABASE"] = db_path
+    Path(app.instance_path).mkdir(parents=True, exist_ok=True)
+    app.config["DATABASE"] = "customers.db"
 
     env = (os.getenv("APP_ENV") or os.getenv("FLASK_ENV") or "production").lower()
     if env == "development":
@@ -342,12 +346,34 @@ def eta_report(obfuscated_id: str):
     return render_template("report_loading.html", job_id=job_id)
 
 
+@app.post("/eta/start")
+def start_eta():
+    instance = (request.json or {}).get("instance") or "DD"  # pick your default/param
+    job_id = secrets.token_hex(16)
+    create_job(job_id)
+
+    t = threading.Thread(
+        target=run_eta_job,
+        args=(app, job_id, instance),
+        daemon=True,
+    )
+    current_app.logger.info("Spawned %s", t.name)
+    t.start()
+
+    return jsonify({"job_id": job_id})
+
+
 @app.get("/jobs/<job_id>")
-def job_status(job_id: str):
-    data = get_job(job_id)
-    if not data:
+def job_status(job_id):
+    job = get_job(job_id)
+    if not job:
         return jsonify({"error": "not found"}), 404
-    return jsonify(data)
+
+    if job["status"] == "running" and time.time() - job["updated_ts"] > STALL_TTL:
+        update_job(job_id, error="Worker stalled (no heartbeat)", done=True)
+        job = get_job(job_id)  # reload
+
+    return jsonify(job)
 
 
 @app.get("/report/<job_id>")

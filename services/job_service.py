@@ -66,39 +66,45 @@ def update_job(job_id: str, pct: Optional[int] = None, message: Optional[str] = 
     status = "failed" if error else ("completed" if done else "running")
     result_json = json.dumps(result) if result is not None else None
 
+    # ✅ keep previous pct when pct is None
     _exec(
         db,
-        "UPDATE jobs SET pct=?, log=?, error=?, result=?, status=?, updated_at=CURRENT_TIMESTAMP WHERE id=?",
-        (pct or 0, json.dumps(logs), error, result_json, status, job_id),
+        """UPDATE jobs
+              SET pct = COALESCE(?, pct),
+                  log = ?,
+                  error = ?,
+                  result = ?,
+                  status = ?,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?""",
+        (pct, json.dumps(logs), error, result_json, status, job_id),
     )
     _commit(db)
 
 
+# services/job_service.py
 def get_job(job_id: str, db=None):
     db = _coerce_db(db)
-    row = _query_one(db, "SELECT * FROM jobs WHERE id=?", (job_id,))
+    row = _query_one(db,
+        "SELECT id, status, pct, log, result, error, "
+        "strftime('%s', updated_at) AS updated_ts "
+        "FROM jobs WHERE id=?", (job_id,))
     if not row:
         return None
 
-    # Normalize row access (sqlite3.Row or tuple)
-    keys = getattr(row, "keys", lambda: [])()
+    by_name = hasattr(row, "keys") and "status" in row.keys()
+    status = row["status"] if by_name else row[1]
+    pct    = (row["pct"] if by_name else row[2]) or 0
+    lograw = row["log"] if by_name else row[3]
+    err    = row["error"] if by_name else row[5] if len(row) > 5 else None
+    resraw = row["result"] if by_name else row[4] if len(row) > 4 else None
+    upd_ts = int(row["updated_ts"] if by_name else row[6])
 
-    def get(col, idx):
-        return row[col] if col in keys else row[idx]
+    try: logs = json.loads(lograw) if lograw else []
+    except Exception: logs = []
+    try: result = json.loads(resraw) if resraw else None
+    except Exception: result = resraw
 
-    result = None
-    raw_result = get("result", 4) if keys else row["result"] if "result" in keys else None
-    if raw_result:
-        try:
-            result = json.loads(raw_result)
-        except Exception:
-            result = raw_result
+    return {"pct": pct, "log": logs, "done": status in {"done","completed","failed","error"},
+            "error": err, "result": result, "status": status, "updated_ts": upd_ts}
 
-    return {
-        "pct": (get("pct", 2) or 0) if keys else row[2] or 0,
-        "log": json.loads(get("log", 3) or "[]") if keys else json.loads(row[3] or "[]"),
-        "done": get("status", 1) in ("completed", "failed") if keys else row[1] in ("completed", "failed"),
-        "error": get("error", 5) if keys else row[5] if len(row) > 5 else None,
-        "result": result,
-        "status": get("status", 1) if keys else row[1],
-    }
