@@ -65,12 +65,10 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
     ''')
     status_mappings = dict(cursor.fetchall())  # odata_status as keys, custom_status as values
 
-    # Remove rows where the ProductionStatus is not in the active status mappings
-    _sales_report = df[df['ProductionStatus'].isin(status_mappings.keys())]
-
-    # Map ProductionStatus using the status mappings
-    _sales_report['ProductionStatus'] = _sales_report['ProductionStatus'].map(
-        lambda x: status_mappings.get(x, x)
+    mask = df['ProductionStatus'].isin(status_mappings.keys())
+    _sales_report = df.loc[mask].copy()  # ← copy
+    _sales_report['ProductionStatus'] = (
+        _sales_report['ProductionStatus'].map(lambda x: status_mappings.get(x, x))
     )
 
     # Remove duplicate rows based on the displayed columns
