@@ -13,8 +13,16 @@ PREFERRED_COLS = [
     "InventoryItem", "Descn", "Instance", "FixedLine"
 ]
 
+# services/eta_export.py (top-level, near DISPLAY_HEADERS)
+_COST_COL_RE = re.compile(r"(^|_|-|\b)cost(s|ed|ing)?(\b|_|-|$)", re.IGNORECASE)
+
+
 # --- NEW: headers for exactly what the table shows ---
 DISPLAY_HEADERS = ["Group", "Item", "Status"]
+
+
+def _strip_cost_columns(headers: List[str]) -> List[str]:
+    return [h for h in headers if not _COST_COL_RE.search(h)]
 
 
 def ordered_headers(rows: Iterable[Dict]) -> List[str]:
@@ -26,7 +34,10 @@ def ordered_headers(rows: Iterable[Dict]) -> List[str]:
         for k in r.keys():
             if k not in seen:
                 seen.append(k)
-    return [c for c in PREFERRED_COLS if c in seen] + [c for c in seen if c not in PREFERRED_COLS]
+    # Build in preferred order, then strip any cost-like columns
+    headers = [c for c in PREFERRED_COLS if c in seen] + [c for c in seen if c not in PREFERRED_COLS]
+    headers = [h for h in headers if not _COST_COL_RE.search(h)]
+    return headers
 
 
 def apply_filters(rows: Iterable[Dict], *, status: str = "", group: str = "", supplier: str = "") -> List[Dict]:
@@ -66,6 +77,7 @@ def safe_base_filename(name_or_id: str, tz: str = "Australia/Sydney") -> str:
 
 
 def to_csv_bytes(rows: Iterable[Dict], headers: List[str]) -> bytes:
+    headers = _strip_cost_columns(headers)
     sio = io.StringIO()
     w = csv.writer(sio, lineterminator="\n")
     w.writerow(headers)
@@ -75,6 +87,7 @@ def to_csv_bytes(rows: Iterable[Dict], headers: List[str]) -> bytes:
 
 
 def to_excel_bytes(rows: Iterable[Dict], headers: List[str]) -> bytes:
+    headers = _strip_cost_columns(headers)
     wb = Workbook()
     ws = wb.active
     ws.title = "Report"
