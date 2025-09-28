@@ -96,7 +96,7 @@ def _configure_logging(app: Flask) -> None:
 def create_app() -> tuple[Flask, str]:
     app = Flask(__name__, instance_relative_config=True)
 
-    # databse path
+    # database path
     db_path = os.environ.get("DATABASE")
     if not db_path:
         raise RuntimeError("DATABASE env var is required")
