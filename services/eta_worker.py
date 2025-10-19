@@ -6,17 +6,14 @@ from flask import current_app
 from services.database import get_db
 from services.job_service import update_job
 from services.eta_report import build_eta_report_context
+from services.job_service import _query_one
 
 
 def load_cache(db, instance):
-    row = db.execute_query("SELECT payload FROM eta_cache WHERE instance=?", (instance,)).fetchone()
+    row = _query_one(db, "SELECT payload FROM eta_cache WHERE instance=?", (instance,))
     if not row:
         return None
-    # sqlite3.Row or tuple-safe
-    try:
-        return row["payload"]
-    except Exception:
-        return row[0]
+    return row["payload"] if hasattr(row, "keys") and "payload" in row.keys() else row[0]
 
 
 def save_cache(db, instance, payload):

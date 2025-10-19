@@ -45,13 +45,14 @@ class ODataClient:
         self.source = source
         self.http_client = http_client or requests
 
-    def get(self, endpoint: str, params: list) -> list:
+    def get(self, endpoint: str, params: list, timeout: int = 30) -> list:
         """
         Sends a GET request or a POST request to the OData service, depending on URL length.
 
         Args:
-            endpoint (str): The endpoint to append to the root URL.
-            params (list): Query parameters for the request.
+            :param endpoint: (str): The endpoint to append to the root URL.
+            :param params: (list): Query parameters for the request.
+            :param timeout:
 
         Returns:
             list: The JSON response from the OData service.
@@ -65,7 +66,7 @@ class ODataClient:
         filter_query = " and ".join(params)
         encoded_filter = {"$filter": filter_query}
         try:
-            response = self.http_client.get(url, params=encoded_filter, auth=self.auth)
+            response = self.http_client.get(url, params=encoded_filter, auth=self.auth, timeout=timeout)
         except requests.exceptions.RequestException as e:
             logging.error(f"GET request failed: {e}")
             raise
