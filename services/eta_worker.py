@@ -1,63 +1,76 @@
-# services/eta_worker.py
 from __future__ import annotations
-import traceback
+import json, traceback
+from typing import Dict, Any, Tuple, Optional
 from requests.exceptions import RequestException, HTTPError, Timeout
 from flask import current_app
 from services.database import get_db
-from services.job_service import update_job
+from services.job_service import update_job, _query_one
 from services.eta_report import build_eta_report_context
-from services.job_service import _query_one
 
 
-def load_cache(db, instance):
-    row = _query_one(db, "SELECT payload FROM eta_cache WHERE instance=?", (instance,))
+def load_cache(db, obfuscated_id: str) -> Optional[Dict[str, Any]]:
+    row = _query_one(db, "SELECT payload FROM eta_cache WHERE obfuscated_id=?", (obfuscated_id,))
     if not row:
         return None
-    return row["payload"] if hasattr(row, "keys") and "payload" in row.keys() else row[0]
+    raw = row["payload"] if hasattr(row, "keys") and "payload" in row.keys() else row[0]
+    try:
+        return json.loads(raw)
+    except Exception:
+        return None
 
 
-def save_cache(db, instance, payload):
+def save_cache(db, obfuscated_id: str, result_dict: Dict[str, Any]) -> None:
+    payload = json.dumps(result_dict)
     db.execute_query(
-        "INSERT INTO eta_cache(instance, payload, updated_at) VALUES(?,?,CURRENT_TIMESTAMP) "
-        "ON CONFLICT(instance) DO UPDATE SET payload=excluded.payload, updated_at=CURRENT_TIMESTAMP",
-        (instance, payload),
+        "INSERT INTO eta_cache(obfuscated_id, payload, updated_at) VALUES(?,?,CURRENT_TIMESTAMP) "
+        "ON CONFLICT(obfuscated_id) DO UPDATE SET payload=excluded.payload, updated_at=CURRENT_TIMESTAMP",
+        (obfuscated_id, payload),
     )
     db.commit()
 
 
-def _fetch_live_or_cached(instance: str, job_id: str, db):
+def _fetch_live_or_cached(obfuscated_id: str, job_id: str, db) -> Tuple[Dict[str,Any], bool]:
+    """
+    Returns a result dict shaped like:
+      {"template": str, "context": dict, "status": int}
+    bool indicates whether it came from cache.
+    """
     try:
-        update_job(job_id, pct=5, message="Calling upstream…", db=db)
-        # If build_eta_report_context accepts timeout, pass it through.
-        payload = build_eta_report_context(instance, timeout=(3, 8))  # remove arg if not supported
-        save_cache(db, instance, payload)
-        update_job(job_id, pct=70, message="Got live data", db=db)
-        return payload, False
+        update_job(job_id, pct=5, message="Building report (live)…", db=db)
+        template, context, status = build_eta_report_context(obfuscated_id, db=db)
+        # ensure id present in context (belt-and-braces)
+        context.setdefault("obfuscated_id", obfuscated_id)
+        result = {"template": template, "context": context, "status": status}
+        save_cache(db, obfuscated_id, result)
+        update_job(job_id, pct=70, message="Live report ready", db=db)
+        return result, False
     except (RequestException, HTTPError, Timeout, Exception) as e:
-        update_job(job_id, message=f"Upstream unavailable ({e}); using cache", db=db)
-        cached = load_cache(db, instance)
+        update_job(job_id, message=f"Upstream unavailable ({e}); using cached report", db=db)
+        cached = load_cache(db, obfuscated_id)
         if not cached:
-            update_job(job_id, error="API down and no cached data available", done=True, db=db)
+            update_job(job_id, error="API down and no cached report available", done=True, db=db)
             raise
         return cached, True
 
 
-def run_eta_job(app, job_id: str, instance: str):
+def run_eta_job(app, job_id: str, obfuscated_id: str) -> None:
+    """
+    Build (or load cached) report for an obfuscated_id and store the standard result
+    shape so /report/<job_id> can render it directly.
+    """
     with app.app_context():
         try:
-            # ✅ early heartbeat (no db arg needed; update_job will open its own)
             update_job(job_id, pct=1, message="Starting…")
-
-            # ✅ get a thread-local DB connection
             db = get_db()
 
-            data, from_cache = _fetch_live_or_cached(instance, job_id, db)
+            result, from_cache = _fetch_live_or_cached(obfuscated_id, job_id, db)
 
+            # Finalize
             update_job(
                 job_id,
                 pct=100,
                 message=("Served cached report" if from_cache else "Report built"),
-                result={"from_cache": from_cache, "payload": data},
+                result=result,   # <-- template/context/status only
                 done=True,
                 db=db,
             )

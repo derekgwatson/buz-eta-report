@@ -156,6 +156,7 @@ def build_eta_report_context(
         "statuses": unique_statuses,
         "groups": unique_groups,
         "suppliers": unique_suppliers,
+        "obfuscated_id": obfuscated_id,
     }
 
     _prog(progress, "Ready.", 95)

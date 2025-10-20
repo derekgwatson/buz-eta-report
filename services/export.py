@@ -1,4 +1,4 @@
-# services/eta_export.py
+# services/export.py
 from typing import List, Dict, Iterable, Tuple, Callable, Optional
 import io, csv, re
 from datetime import datetime
@@ -7,10 +7,19 @@ from openpyxl import Workbook
 from openpyxl.utils import get_column_letter
 from openpyxl.styles import Font
 
+
+SENSITIVE_KEY_RE = re.compile(r"(cost|buy|cogs|margin|markup|wholesale|supplier.?price)", re.I)
 PREFERRED_COLS = [
     "RefNo", "DateScheduled", "ProductionStatus", "ProductionLine",
     "InventoryItem", "Descn", "Instance", "FixedLine"
 ]
+
+
+def scrub_sensitive(rows):
+    safe = []
+    for r in rows:
+        safe.append({k: v for k, v in r.items() if not SENSITIVE_KEY_RE.search(str(k))})
+    return safe
 
 
 def ordered_headers(rows: Iterable[Dict]) -> List[str]:
@@ -59,6 +68,10 @@ def to_excel_bytes(rows: Iterable[Dict], headers: List[str]) -> bytes:
     ws = wb.active
     ws.title = "Report"
 
+    if not headers:
+        # Fallback to CSV w/ no headers instead of producing a broken workbook
+        return to_csv_bytes(rows, [])
+
     ws.append(headers)
     for c in ws[1]:
         c.font = Font(bold=True)
@@ -78,6 +91,7 @@ def to_excel_bytes(rows: Iterable[Dict], headers: List[str]) -> bytes:
     bio = io.BytesIO()
     wb.save(bio)
     bio.seek(0)
+
     return bio.getvalue()
 
 

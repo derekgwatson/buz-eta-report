@@ -1,22 +1,18 @@
-import requests
-from services.buz_data import get_open_orders, get_data_by_order_no, get_statuses, ODataClient
-from services.database import query_db
 import pytest
+import requests
+from unittest.mock import MagicMock
+
+from services.odata_client import ODataClient
+from services.buz_data import (
+    get_open_orders,
+    get_statuses,
+)
+from services.odata_utils import odata_quote
 
 
-class MockHttpClient:
-    def __init__(self):
-        self.responses = {}
-
-    def set_mock_response(self, url, params, response):
-        self.responses[(url, frozenset(params.items()))] = response
-
-    def get(self, url, params, auth=None):
-        key = (url, frozenset(params.items()))
-        if key not in self.responses:
-            raise ValueError(f"No mock response set for {key}")
-        return MockResponse(self.responses[key])
-
+# ---------------------------
+# Test doubles / fixtures
+# ---------------------------
 
 class MockResponse:
     def __init__(self, json_data, status_code=200):
@@ -31,169 +27,247 @@ class MockResponse:
             raise requests.HTTPError(f"HTTP Error: {self.status_code}")
 
 
+class MockHttpClient:
+    """
+    Drop-in replacement for requests.Session used by ODataClient.
+    - Keyed by (url, frozenset(params.items())).
+    - Supports status_code and raising exceptions (e.g., Timeout).
+    - Ignores auth/timeout kwargs (so prod code can pass them).
+    """
+    def __init__(self):
+        self._responses = {}
+        self._errors = {}
+
+    def set_mock_response(self, url, params, json_data, status_code=200):
+        key = (url, frozenset(params.items()) if params else None)
+        self._responses[key] = (json_data, status_code)
+
+    def set_mock_error(self, url, params, exc):
+        key = (url, frozenset(params.items()) if params else None)
+        self._errors[key] = exc
+
+    def get(self, url, params=None, auth=None, timeout=None):
+        key = (url, frozenset(params.items()) if params else None)
+        if key in self._errors:
+            raise self._errors[key]
+        if key not in self._responses:
+            raise AssertionError(f"No mock response set for {url} with {params}")
+        json_data, status_code = self._responses[key]
+        return MockResponse(json_data, status_code=status_code)
+
+
 @pytest.fixture
 def mock_http_client():
-    """Fixture to provide a reusable MockHttpClient."""
     return MockHttpClient()
 
 
-def test_odata_client_get_success(mock_http_client):
-    # Set up mock response
-    mock_http_client.set_mock_response(
-        "https://api.buzmanager.com/reports/DESDR/JobsScheduleDetailed",
-        {"$filter": "OrderStatus eq 'Work in Progress'"},
-        {
-            "value": [
-                {"RefNo": "123", "DateScheduled": "2025-01-01T10:00:00Z", "ProductionStatus": "In Progress"},
-                {"RefNo": "456", "DateScheduled": "2025-01-02T11:00:00Z", "ProductionStatus": "Completed"},
-            ]
-        },
-    )
+# ---------------------------
+# OData quoting tests
+# ---------------------------
 
-    # Initialize ODataClient with mock HTTP client
-    client = ODataClient(source="DD", http_client=mock_http_client)
-
-    # Call get method
-    result = client.get("JobsScheduleDetailed", ["OrderStatus eq 'Work in Progress'"])
-
-    # Assertions
-    expected = [
-        {"RefNo": "123", "DateScheduled": "01 Jan 2025", "ProductionStatus": "In Progress", "Instance": "DD"},
-        {"RefNo": "456", "DateScheduled": "02 Jan 2025", "ProductionStatus": "Completed", "Instance": "DD"},
-    ]
-    assert result == expected
-
-
-def test_odata_quoting():
-    from services.odata_utils import odata_quote
+def test_odata_quoting_simple():
     assert odata_quote("O'Malley") == "'O''Malley'"
-
     name = "O'Malley"
     assert f"Customer eq {odata_quote(name)}" == "Customer eq 'O''Malley'"
 
 
 def test_odata_quoting_more():
-    from services.odata_utils import odata_quote
-    assert odata_quote("D'Angelo's") == "'D''Angelo''s'"
     n = "D'Angelo's"
+    assert odata_quote(n) == "'D''Angelo''s'"
     assert f"Customer eq {odata_quote(n)}" == "Customer eq 'D''Angelo''s'"
 
 
-def test_odata_client_get_failure(mock_http_client):
-    # Set up mock response with HTTP error
+# ---------------------------
+# ODataClient tests
+# ---------------------------
+
+def test_odata_client_get_success(mock_http_client):
+    base = "https://api.buzmanager.com/reports/DESDR"
+    endpoint = "JobsScheduleDetailed"
+    url = f"{base}/{endpoint}"
+    params = {"$filter": "OrderStatus eq 'Work in Progress'"}
+
     mock_http_client.set_mock_response(
-        "https://api.buzmanager.com/reports/WATSO/JobsScheduleDetailed",
-        {"$filter": "OrderStatus eq 'Invalid'"},
-        {"error": "Bad Request"},
+        url,
+        params,
+        {
+            "value": [
+                {
+                    "RefNo": "123",
+                    "DateScheduled": "2025-01-01T10:00:00Z",
+                    "ProductionStatus": "In Progress",
+                },
+                {
+                    "RefNo": "456",
+                    "DateScheduled": "2025-01-02T11:00:00Z",
+                    "ProductionStatus": "Completed",
+                },
+            ]
+        },
+        status_code=200,
     )
 
-    # Initialize ODataClient with mock HTTP client
-    client = ODataClient(source="CBR", http_client=mock_http_client)
+    client = ODataClient(source="DD", http_client=mock_http_client)
+    result = client.get(endpoint, ["OrderStatus eq 'Work in Progress'"])
 
-    # Call get method and expect an exception
-    with pytest.raises(requests.HTTPError):
-        client.get("JobsScheduleDetailed", ["OrderStatus eq 'Invalid'"])
-
-
-def test_query_db(app):
-    with app.app_context():
-        result = query_db("SELECT 1")
-        assert result is not None
-
-
-def test_get_statuses(mock_odata_client):
-    # Mock ODataClient
-    mock_instance = "test_instance"
-    mock_data = [
-        {"ProductionStatus": "In Progress"},
-        {"ProductionStatus": "Completed"},
-        {"ProductionStatus": None},
-    ]
-    mock_odata_client.return_value.get.return_value = mock_data
-
-    # Call the function
-    statuses = get_statuses(mock_instance)
-
-    # Assertions
-    assert statuses == {"In Progress", "Completed"}
-    mock_odata_client.assert_called_once_with(mock_instance)
-    mock_odata_client.return_value.get.assert_called_once_with(
-        "JobsScheduleDetailed",
-        ["OrderStatus eq 'Work in Progress'", "ProductionStatus ne 'null'"]
-    )
-
-
-def test_get_open_orders(self, mock_cursor, mock_odata_client):
-    # Mock response data
-    mock_data = [
-        {
-            "RefNo": "ORD001",
-            "Descn": "Order 1",
-            "DateScheduled": "2024-12-01",
-            "ProductionLine": "Line 1",
-            "InventoryItem": "Item 1",
-            "ProductionStatus": "In Progress",
-            "FixedLine": 1,
-        },
-        {
-            "RefNo": "ORD001",
-            "Descn": "Order 1",
-            "DateScheduled": "2024-12-01",
-            "ProductionLine": "Line 1",
-            "InventoryItem": "Item 1",
-            "ProductionStatus": "In Progress",
-            "FixedLine": 1,  # Duplicate to test drop_duplicates
-        },
-    ]
-    mock_odata_client.return_value.get.return_value = mock_data
-
-    # Mock the database cursor
-    mock_cursor.return_value.fetchall.return_value = [
-        ("In Progress", "Active")  # Sample status mapping
-    ]
-
-    # Call the function
-    result = get_open_orders(MagicMock(), "Customer A", "TestInstance")
-
-    # Expected result after deduplication and sorting
     expected = [
         {
+            "RefNo": "123",
+            "DateScheduled": "01 Jan 2025",
+            "ProductionStatus": "In Progress",
+            "Instance": "DD",
+        },
+        {
+            "RefNo": "456",
+            "DateScheduled": "02 Jan 2025",
+            "ProductionStatus": "Completed",
+            "Instance": "DD",
+        },
+    ]
+    assert result == expected
+
+
+def test_odata_client_get_failure_http_error(mock_http_client):
+    base = "https://api.buzmanager.com/reports/WATSO"
+    endpoint = "JobsScheduleDetailed"
+    url = f"{base}/{endpoint}"
+    params = {"$filter": "OrderStatus eq 'Invalid'"}
+
+    # Return 400 so raise_for_status triggers
+    mock_http_client.set_mock_response(
+        url,
+        params,
+        {"error": "Bad Request"},
+        status_code=400,
+    )
+
+    client = ODataClient(source="CBR", http_client=mock_http_client)
+    with pytest.raises(requests.HTTPError):
+        client.get(endpoint, ["OrderStatus eq 'Invalid'"])
+
+
+def test_odata_client_timeout_propagates(mock_http_client):
+    base = "https://api.buzmanager.com/reports/DESDR"
+    endpoint = "JobsScheduleDetailed"
+    url = f"{base}/{endpoint}"
+    params = {"$filter": "OrderStatus eq 'Work in Progress'"}
+
+    # Simulate a network timeout from the session.get()
+    mock_http_client.set_mock_error(url, params, requests.Timeout("connect/read timeout"))
+
+    client = ODataClient(source="DD", http_client=mock_http_client)
+    with pytest.raises(requests.Timeout):
+        client.get(endpoint, ["OrderStatus eq 'Work in Progress'"])
+
+
+# ---------------------------
+# Higher-level helpers (buz_data) tests
+# ---------------------------
+
+def test_get_statuses(monkeypatch):
+    """
+    Ensures we request 'ne null' (no quotes) and return a set of known statuses.
+    """
+    calls = {}
+
+    class _StubClient:
+        def __init__(self, instance):
+            calls["instance"] = instance
+
+        def get(self, endpoint, filters):
+            calls["endpoint"] = endpoint
+            calls["filters"] = filters
+            return [
+                {"ProductionStatus": "In Progress"},
+                {"ProductionStatus": "Completed"},
+                {"ProductionStatus": None},
+            ]
+
+    # Monkeypatch constructor used by get_statuses(...) to our stub
+    monkeypatch.setattr("services.buz_data.ODataClient", _StubClient)
+
+    statuses = get_statuses("test_instance")
+    assert set(statuses["data"]) == {"In Progress", "Completed"}
+    assert calls["endpoint"] == "JobsScheduleDetailed"
+    # Expect unquoted null per OData
+    assert "ProductionStatus ne null" in calls["filters"]
+
+
+def test_get_open_orders_dedup_and_mapping(monkeypatch):
+    # Stub OData client
+    class _StubClient:
+        def __init__(self, instance):
+            pass
+
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD001",
+                    "Descn": "Order 1",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 1,
+                },
+                # Duplicate row to test drop_duplicates
+                {
+                    "RefNo": "ORD001",
+                    "Descn": "Order 1",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 1,
+                },
+            ]
+
+    monkeypatch.setattr("services.buz_data.ODataClient", _StubClient)
+
+    # Fake DB connection to return a custom status mapping
+    class _Cursor:
+        def execute(self, *_a, **_k): return self
+        def fetchall(self):           return [("In Progress", "Active")]  # two cols are fine for mapping
+
+    class _Conn:
+        def cursor(self): return _Cursor()
+
+        def execute(self, *_args, **_kwargs):
+            return _Cursor()
+
+    result = get_open_orders(_Conn(), "Customer A", "TestInstance")
+    assert result["source"] == "live"
+    assert result["data"] == [
+        {
             "RefNo": "ORD001",
             "Descn": "Order 1",
             "DateScheduled": "2024-12-01",
             "ProductionLine": "Line 1",
             "InventoryItem": "Item 1",
-            "ProductionStatus": "Active",  # Custom status mapped
+            "ProductionStatus": "Active",  # mapped from "In Progress"
             "FixedLine": 1,
         }
     ]
 
-    self.assertEqual(result, expected)
 
+def test_get_open_orders_empty(monkeypatch):
+    class _StubClient:
+        def __init__(self, instance):
+            pass
 
-def test_get_open_orders_empty(self, mock_odata_client):
-    mock_odata_client.return_value.get.return_value = []
-    result = get_open_orders(MagicMock(), "NonExistingCustomer", "TestInstance")
-    self.assertEqual(result, [])
+        def get(self, endpoint, filters):
+            return []
 
+    monkeypatch.setattr("services.buz_data.ODataClient", _StubClient)
 
-def test_get_schedule_jobs_details(self, mock_odata_client):
-    mock_data = [
-        {"RefNo": "ORD001", "JobDetails": "Detail A"},
-        {"RefNo": "ORD001", "JobDetails": "Detail B"},
-    ]
-    mock_odata_client.return_value.get.return_value = mock_data
+    class _Conn:
+        def execute(self, *_args, **_kwargs):
+            class _C:
+                def execute(self, *_a, **_k): return self
+                def fetchall(self): return []
+            return _C()
 
-    result = get_schedule_jobs_details("ORD001", "JobsScheduleDetailed", "TestInstance")
-    self.assertEqual(result, mock_data)
-
-
-def test_get_schedule_jobs_details_error(self, mock_odata_client):
-    mock_odata_client.return_value.get.side_effect = requests.exceptions.RequestException("Network error")
-    result = get_schedule_jobs_details("ORD001", "JobsScheduleDetailed", "TestInstance")
-    expected = {"error": "Failed to fetch JobsScheduleDetails: Network error"}
-    self.assertEqual(result, expected)
-
-
-if __name__ == "__main__":
-    unittest.main()
+    assert get_open_orders(_Conn(), "NonExistingCustomer", "TestInstance") == {
+        "data": [],
+        "source": "live",
+    }

@@ -4,6 +4,34 @@ import requests
 from requests.auth import HTTPBasicAuth
 from dotenv import load_dotenv
 import logging
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
+
+
+DEFAULT_TIMEOUT = (5, 20)  # (connect, read) seconds
+
+
+class TimeoutSession(requests.Session):
+    def __init__(self, timeout=DEFAULT_TIMEOUT):
+        super().__init__()
+        self._timeout = timeout
+
+    def request(self, *args, **kwargs):
+        kwargs.setdefault("timeout", self._timeout)
+        return super().request(*args, **kwargs)
+
+
+def _session_with_retries() -> requests.Session:
+    s = TimeoutSession()
+    retry = Retry(
+        total=3, backoff_factor=0.5,
+        status_forcelist=(429, 500, 502, 503, 504),
+        allowed_methods=frozenset(["GET"])
+    )
+    adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
+    s.mount("http://", adapter);
+    s.mount("https://", adapter)
+    return s
 
 
 class ODataClient:
@@ -44,8 +72,9 @@ class ODataClient:
         self.auth = HTTPBasicAuth(self.username, self.password)
         self.source = source
         self.http_client = http_client or requests
+        self.http = http_client or _session_with_retries()
 
-    def get(self, endpoint: str, params: list, timeout: int = 30) -> list:
+    def get(self, endpoint: str, params: list) -> list:
         """
         Sends a GET request or a POST request to the OData service, depending on URL length.
 
@@ -66,13 +95,12 @@ class ODataClient:
         filter_query = " and ".join(params)
         encoded_filter = {"$filter": filter_query}
         try:
-            response = self.http_client.get(url, params=encoded_filter, auth=self.auth, timeout=timeout)
+            response = self.http.get(url, params=encoded_filter, auth=self.auth)
+            response.raise_for_status()
+
         except requests.exceptions.RequestException as e:
             logging.error(f"GET request failed: {e}")
             raise
-
-        # Ensure the request was successful
-        response.raise_for_status()
 
         # Process and reformat dates
         data = response.json()

@@ -7,7 +7,6 @@ import logging.config
 import atexit
 from datetime import timedelta
 from functools import wraps
-from pathlib import Path
 from dotenv import load_dotenv, find_dotenv
 from flask import (
     Flask,
@@ -37,6 +36,7 @@ import requests
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
 from services.update_status_mapping import get_status_mapping, edit_status_mapping, get_status_mappings
+from sentry_sdk.integrations.logging import LoggingIntegration
 
 from services.database import (
     get_db,
@@ -93,8 +93,19 @@ def _configure_logging(app: Flask) -> None:
     app.logger.setLevel(app.config.get("LOG_LEVEL", "INFO"))
 
 
-def create_app() -> tuple[Flask, str]:
+def _before_send(event, hint):
+    # drop request bodies and emails
+    req = event.get("request") or {}
+    if "data" in req: req["data"] = "[filtered]"
+    user = event.get("user") or {}
+    if "email" in user: user["email"] = "[filtered]"
+    event["request"] = req; event["user"] = user
+    return event
+
+
+def create_app(testing: bool = False) -> tuple[Flask, str]:
     app = Flask(__name__, instance_relative_config=True)
+    app.config["TESTING"] = testing
 
     # database path
     db_path = os.environ.get("DATABASE")
@@ -111,6 +122,20 @@ def create_app() -> tuple[Flask, str]:
         from config import StagingConfig as Cfg
     else:
         raise RuntimeError(f"Unknown APP_ENV/FLASK_ENV value: {env!r}")
+
+    # Don’t initialize Sentry in tests (or when explicitly disabled)
+    sentry_disabled = os.getenv("SENTRY_DISABLED") == "1"
+    if (not testing) and (not sentry_disabled) and os.getenv("SENTRY_DSN"):
+        sentry_sdk.init(
+            dsn=os.getenv("SENTRY_DSN"),
+            integrations=[FlaskIntegration(), LoggingIntegration(level=logging.INFO, event_level=logging.ERROR)],
+            traces_sample_rate=0.2,  # avoid 100% in prod
+            profiles_sample_rate=0.1,  # optional: enable profiling a bit
+            environment=env,
+            send_default_pii=False,  # safer default; see scrubbing below
+            before_send=_before_send,
+            shutdown_timeout=0,  # avoid "Waiting up to 2 seconds" on exit
+        )
 
     app.config.from_object(Cfg)
     _configure_logging(app)
@@ -179,14 +204,6 @@ def create_app() -> tuple[Flask, str]:
 
 app, ENV = create_app()
 
-# ---------- Sentry ----------
-sentry_sdk.init(
-    dsn=os.getenv("SENTRY_DSN"),
-    integrations=[FlaskIntegration()],
-    traces_sample_rate=1.0,
-    environment=ENV,
-    send_default_pii=True,
-)
 
 # ---------- helpers ----------
 def role_required(*required_roles):
@@ -285,9 +302,13 @@ def admin():
     app.logger.debug(_debug_db_snapshot())
 
     if request.method == "POST":
-        dd_name = request.form["dd_name"]
-        cbr_name = request.form["cbr_name"]
-        field_type = request.form["field_type"]
+        dd_name = (request.form.get("dd_name") or "").strip()
+        cbr_name = (request.form.get("cbr_name") or "").strip()
+        field_type = request.form.get("field_type") or "Customer Name"
+        if not (dd_name or cbr_name):
+            return render_template("400.html", message="Pick at least one customer."), 400
+        if field_type not in {"Customer Name", "Customer Group"}:
+            return render_template("400.html", message="Invalid field type."), 400
         obfuscated_id = uuid.uuid4().hex
 
         query_db(
@@ -314,6 +335,9 @@ def eta_report_sync(obfuscated_id: str):
     db = get_db()
     try:
         template, context, status = build_eta_report_context(obfuscated_id, db=db)
+        current_app.logger.debug("worker ctx keys: %s", sorted(context.keys()))
+        current_app.logger.debug("worker obfuscated_id: %r", context.get("obfuscated_id"))
+        context.setdefault("obfuscated_id", obfuscated_id)
         return render_template(template, **context), status
     except requests.exceptions.RequestException as exc:
         msg = f"Failed to generate report: {exc}"
@@ -325,15 +349,28 @@ def _run_eta_report_job(job_id: str, obfuscated_id: str) -> None:
     try:
         update_job(job_id, pct=5, message="Loading customer…", db=db)
         template, context, status = build_eta_report_context(obfuscated_id, db=db)
+        context.setdefault("obfuscated_id", obfuscated_id)
         update_job(
             job_id,
             pct=100,
             message="Ready",
-            result={"template": template, "context": context, "status": status},
+            result={
+                "template": template,
+                "context": context,
+                "status": status,
+                "obfuscated_id": obfuscated_id,
+            },
             done=True,
             db=db,
         )
     except Exception as exc:
+        sentry_sdk.capture_exception(
+            exc,
+            scope=lambda scope: scope.set_context(
+                "job",
+                {"job_id": job_id, "obfuscated_id": obfuscated_id}
+            ),
+        )
         update_job(job_id, error=str(exc), message="Job failed", db=db)
         raise
     finally:
@@ -392,7 +429,12 @@ def report_render(job_id: str):
         result = data.get("result") or {}
         template = result.get("template") or "report.html"
         context = result.get("context") or {}
+        context["obfuscated_id"] = job_id
         status = result.get("status") or 200
+
+        current_app.logger.debug("render ctx keys: %s", sorted(context.keys()))
+        current_app.logger.debug("render obfuscated_id: %r", context.get("obfuscated_id"))
+
         return render_template(template, **context), status
     except requests.exceptions.RequestException as exc:
         # No obfuscated_id in scope here; show a generic 500 page.
@@ -449,8 +491,10 @@ def list_status_mappings():
 @role_required("admin", "user")
 def edit_status_mapping_route(mapping_id: int):
     if request.method == "POST":
-        custom_status = request.form["custom_status"]
-        active = "active" in request.form
+        custom_status = (request.form.get("custom_status") or "").strip()
+        active = bool(request.form.get("active"))
+        if not custom_status:
+            return render_template("400.html", message="Custom status required."), 400
         edit_status_mapping(mapping_id, custom_status, active, conn=get_db())
         return redirect(url_for("list_status_mappings"))
 
@@ -462,6 +506,8 @@ def edit_status_mapping_route(mapping_id: int):
 @login_required
 @role_required("admin")
 def refresh_statuses():
+    from services.update_status_mapping import populate_status_mapping_table
+
     try:
         populate_status_mapping_table(get_db())
         # flash works if template shows flashes
@@ -486,6 +532,7 @@ def _customer_data_only(conn, customer, instance):
 
 @app.route("/<obfuscated_id>/download.<fmt>")
 def download_orders(obfuscated_id: str, fmt: str):
+    from services.export import scrub_sensitive
     rows, customer_name = fetch_report_rows_and_name(
         obfuscated_id,
         query_db=query_db,
@@ -502,6 +549,7 @@ def download_orders(obfuscated_id: str, fmt: str):
         group=request.args.get("group") or request.args.get("groupFilter"),
         supplier=request.args.get("supplier") or request.args.get("supplierFilter"),
     )
+    rows = scrub_sensitive(rows)
     headers = ordered_headers(rows)
 
     if fmt == "xlsx":
@@ -681,11 +729,12 @@ REQ_ALWAYS = ["FLASK_SECRET", "GOOGLE_CLIENT_ID", "GOOGLE_CLIENT_SECRET", "DATAB
 REQ_PROD = ["SERVER_NAME"]  # SENTRY_DSN optional; don’t block startup
 
 _missing = [v for v in REQ_ALWAYS if not os.getenv(v)]
+
 if ENV == "production":
     _missing += [v for v in REQ_PROD if not os.getenv(v)]
+
 if _missing:
     raise RuntimeError(f"Missing required environment variables: {', '.join(sorted(set(_missing)))}")
-
 
 if __name__ == "__main__":
     app.run(debug=True)

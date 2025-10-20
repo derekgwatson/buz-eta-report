@@ -164,16 +164,17 @@
   </div>
 {% endif %}
 
-  <div class="header-rail">
+    <div class="header-rail">
     <div class="btn-group btn-group-sm export-group">
       <button type="button" class="btn btn-default dropdown-toggle" data-toggle="dropdown" title="Export current view">
         <span class="glyphicon glyphicon-download-alt"></span>
         <span class="hidden-xs"> Export</span> <span class="caret"></span>
       </button>
+      <div id="export-root" data-obf="{{ obfuscated_id }}"></div>
       <ul class="dropdown-menu dropdown-menu-right">
         <li class="dropdown-header">Download</li>
-        <li><a id="downloadCsv"  href="{{ csv_url }}" data-base="{{ csv_url }}"><span class="glyphicon glyphicon-file"></span> CSV (.csv)</a></li>
-        <li><a id="downloadXlsx" href="{{ xlsx_url }}" data-base="{{ xlsx_url }}"><span class="glyphicon glyphicon-list-alt"></span> Excel (.xlsx)</a></li>
+        <li><a class="dropdown-item" href="#" onclick="return exportClick(event, 'csv')"><span class="glyphicon glyphicon-file"></span> CSV (.csv)</a></li>
+        <li><a class="dropdown-item" href="#" onclick="return exportClick(event, 'xlsx')"><span class="glyphicon glyphicon-list-alt"></span> Excel (.xlsx)</a></li>
       </ul>
     </div>
 
@@ -417,9 +418,7 @@
         // Reapply filters with cleared inputs
         applyFilters();
     }
-</script>
 
-<script>
     function updateDownloadLinks() {
       var csv  = document.getElementById("downloadCsv");
       var xlsx = document.getElementById("downloadXlsx");
@@ -451,6 +450,31 @@
     });
     window.addEventListener("load", updateDownloadLinks);
 
+    function exportClick(e, fmt) {
+        e.preventDefault(); // stop <a> default navigation
+
+        const root = document.getElementById('export-root');
+        const obf  = root?.dataset?.obf;
+        if (!obf) {
+          alert('Missing customer id — cannot export.');
+          return false;
+        }
+
+        // grab current filter control values (adjust selectors to match yours)
+        const statusSel   = document.querySelector('#status, #statusFilter');
+        const groupSel    = document.querySelector('#group, #groupFilter');
+        const supplierSel = document.querySelector('#supplier, #supplierFilter');
+
+        const params = new URLSearchParams();
+        if (statusSel?.value && statusSel.value !== 'All')   params.set('status', statusSel.value);
+        if (groupSel?.value && groupSel.value !== 'All')     params.set('group', groupSel.value);
+        if (supplierSel?.value && supplierSel.value !== 'All') params.set('supplier', supplierSel.value);
+
+        // IMPORTANT: absolute, leading slash so we never get "http://download.csv/"
+        const url = `${window.location.origin}/${obf}/download.${fmt}` + (params.toString() ? `?${params}` : '');
+        window.location.href = url;
+        return false;
+      }
 </script>
 
 <script src="https://code.jquery.com/jquery-3.7.1.min.js"></script>
