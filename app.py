@@ -48,19 +48,20 @@ from services.migrations import run_migrations
 from services.eta_report import build_eta_report_context
 from services.buz_data import get_data_by_order_no, get_open_orders, get_open_orders_by_group
 from services.job_service import create_job, update_job, get_job
-from services.export import (
-    fetch_report_rows_and_name,
-    apply_filters,
-    ordered_headers,
-    safe_base_filename,
-    to_csv_bytes,
-    to_excel_bytes,
-)
 import click
 
 import secrets, threading
 from services.eta_worker import run_eta_job
 
+from services.export import (
+    scrub_sensitive,
+    ordered_headers,
+    apply_filters,
+    to_excel_bytes,
+    to_csv_bytes,
+    fetch_report_rows_and_name,
+    safe_base_filename,
+)
 
 STALL_TTL = 20  # seconds without updates
 
@@ -429,11 +430,9 @@ def report_render(job_id: str):
         result = data.get("result") or {}
         template = result.get("template") or "report.html"
         context = result.get("context") or {}
-        context["obfuscated_id"] = job_id
+        if "obfuscated_id" not in context:
+            current_app.logger.warning("report_render: missing obfuscated_id for job %s", job_id)
         status = result.get("status") or 200
-
-        current_app.logger.debug("render ctx keys: %s", sorted(context.keys()))
-        current_app.logger.debug("render obfuscated_id: %r", context.get("obfuscated_id"))
 
         return render_template(template, **context), status
     except requests.exceptions.RequestException as exc:
@@ -530,9 +529,8 @@ def _customer_data_only(conn, customer, instance):
     return res["data"] if isinstance(res, dict) else (res or [])
 
 
-@app.route("/<obfuscated_id>/download.<fmt>")
+@app.route("/<obfuscated_id>/download.<fmt>", methods=["GET"])
 def download_orders(obfuscated_id: str, fmt: str):
-    from services.export import scrub_sensitive
     rows, customer_name = fetch_report_rows_and_name(
         obfuscated_id,
         query_db=query_db,
@@ -549,6 +547,7 @@ def download_orders(obfuscated_id: str, fmt: str):
         group=request.args.get("group") or request.args.get("groupFilter"),
         supplier=request.args.get("supplier") or request.args.get("supplierFilter"),
     )
+    # Redact sensitive columns BEFORE header calc
     rows = scrub_sensitive(rows)
     headers = ordered_headers(rows)
 
@@ -561,11 +560,12 @@ def download_orders(obfuscated_id: str, fmt: str):
     else:
         return render_template("400.html", message=f"Unrecognised format: {fmt}"), 400
 
+    filename = f"{safe_base_filename(customer_name or obfuscated_id)}.{fmt}"
     return send_file(
         io.BytesIO(data),
         mimetype=mimetype,
         as_attachment=True,
-        download_name=safe_base_filename(customer_name or obfuscated_id) + "." + fmt,
+        download_name=filename,
     )
 
 

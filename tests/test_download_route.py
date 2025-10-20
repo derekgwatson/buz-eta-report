@@ -136,3 +136,17 @@ def test_filter_precedence_status_and_legacy_params(client, monkeypatch):
     # Only legacy names exist for group/supplier in this request
     assert seen_kwargs["group"] == "G"
     assert seen_kwargs["supplier"] == "S"
+
+
+def test_report_render_preserves_obfuscated_id(client, monkeypatch):
+    job_id = "job123"
+    result = {
+        "template": "report.html",
+        "status": 200,
+        "context": {"obfuscated_id": "obf-abc123", "some": "ctx"}
+    }
+    monkeypatch.setattr("app.get_job", lambda _: {"status": "completed", "result": result}, raising=True)
+
+    r = client.get(f"/report/{job_id}")
+    assert r.status_code == 200
+    assert b'data-obf="obf-abc123"' in r.data  # comes from template div
