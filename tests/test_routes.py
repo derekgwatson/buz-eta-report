@@ -97,7 +97,7 @@ def test_job_status_stalled_marks_done(client, monkeypatch):
     r = client.get("/jobs/job1")
     assert r.status_code == 200
     body = r.get_json()
-    assert body.get("error") == "Worker stalled (no heartbeat)" or body.get("status") == "running"
+    assert body.get("error") == "Worker stalled" or body.get("status") == "running"
     # After one call, update_job should have run and job should be refreshed
     r2 = client.get("/jobs/job1")
     assert r2.status_code == 200

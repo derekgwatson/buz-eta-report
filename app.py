@@ -65,7 +65,7 @@ import click, sqlite3
 from services.migrations import _backup_sqlite
 
 
-STALL_TTL = 20  # seconds without updates
+STALL_TTL = 30  # seconds without updates
 
 
 # ---------- env ----------
@@ -429,7 +429,7 @@ def job_status(job_id):
         return jsonify({"error": "not found"}), 404
 
     if job["status"] == "running" and time.time() - job["updated_ts"] > STALL_TTL:
-        update_job(job_id, error="Worker stalled (no heartbeat)", done=True)
+        update_job(job_id, error="Worker stalled", done=True)
         job = get_job(job_id)  # reload
 
     return jsonify(job)
