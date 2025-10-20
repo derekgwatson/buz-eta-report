@@ -1,6 +1,5 @@
 import pytest
 import requests
-from unittest.mock import MagicMock
 
 # OData client lives here
 from services.odata_client import ODataClient
@@ -11,8 +10,10 @@ from services.buz_data import (
     get_open_orders_by_group,
     get_data_by_order_no,
     fetch_and_process_orders,
+    fetch_or_cached
 )
 from services.odata_utils import odata_quote
+from services.fetcher import ensure_cache_table, set_cache
 
 
 # ---------------------------
@@ -361,3 +362,26 @@ def test_get_data_by_order_no_live(monkeypatch):
 
     out = get_data_by_order_no("ORD-123", "SomeEndpoint", "TestInst")
     assert out == {"data": [{"RefNo": "ORD-123", "Foo": "Bar"}], "source": "live"}
+
+
+def test_fallback_on_500(monkeypatch):
+    ensure_cache_table()
+    # Prewarm cache for key "k"
+    set_cache("k", [{"RefNo": "R1"}], meta={"note": "prewarmed"})
+
+    def boom():
+        import requests
+        raise requests.HTTPError(response=type("R", (), {"status_code": 500})())
+
+    data, source = fetch_or_cached(
+        cache_key="k",
+        fetch_fn=boom,
+        force_refresh=True,
+        max_age_minutes_when_open=0,
+        fallback_http_statuses=(500, 503),
+        fallback_on_timeouts=True,
+        fallback_on_conn_errors=True,
+    )
+
+    assert data == [{"RefNo": "R1"}]
+    assert source.startswith("cache")

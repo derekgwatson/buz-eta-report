@@ -1,10 +1,20 @@
 from __future__ import annotations
 
-from typing import Dict, Any, List
-import pandas as pd
 from services.odata_client import ODataClient
 from services.fetcher import fetch_or_cached
 from services.odata_utils import odata_quote
+
+import pandas as pd
+from typing import List, Any, Callable, Dict, Optional, Tuple
+import json
+import time
+import requests
+from flask import current_app
+
+CacheGet = Callable[[str], Optional[str]]
+CacheSet = Callable[[str, str, int], None]
+
+DANGEROUS_STATUS = tuple(range(500, 600))  # treat 5xx as hard failures
 
 
 def get_statuses(instance: str) -> dict:
@@ -33,7 +43,7 @@ def get_statuses(instance: str) -> dict:
         # Always try live first; fall back on 503/timeouts/conn errors
         force_refresh=True,
         max_age_minutes_when_open=0,   # ignored because force_refresh=True
-        fallback_http_statuses=(503,), # treat 503 as blackout
+        fallback_http_statuses=(500, 503,), # treat 503 as blackout
         fallback_on_timeouts=True,
         fallback_on_conn_errors=True,
         cooldown_on_503_minutes=10,    # avoid hammering during blackout
@@ -117,7 +127,7 @@ def get_open_orders(conn, customer: str, instance: str) -> dict:
         fetch_fn=_fetch,
         force_refresh=True,             # try live first
         max_age_minutes_when_open=0,    # ignored when force_refresh=True
-        fallback_http_statuses=(503,),  # blackout
+        fallback_http_statuses=(500, 503,),  # blackout
         fallback_on_timeouts=True,
         fallback_on_conn_errors=True,
         cooldown_on_503_minutes=10,
@@ -188,7 +198,7 @@ def get_open_orders_by_group(conn, customer_group: str, instance: str) -> dict:
         # Always attempt live first; fall back if 503/timeout/conn error
         force_refresh=True,
         max_age_minutes_when_open=0,    # ignored because force_refresh=True
-        fallback_http_statuses=(503,),  # treat 503 as blackout
+        fallback_http_statuses=(500, 503,),  # treat 503 as blackout
         fallback_on_timeouts=True,
         fallback_on_conn_errors=True,
         cooldown_on_503_minutes=10,     # avoid hammering during blackout
@@ -219,9 +229,55 @@ def get_data_by_order_no(order_no: str, endpoint: str, instance: str) -> dict:
         fetch_fn=_fetch,
         force_refresh=True,             # always attempt live first
         max_age_minutes_when_open=0,    # ignored when force_refresh=True
-        fallback_http_statuses=(503,),  # 503 = blackout
+        fallback_http_statuses=(500, 503,),  # 503 = blackout
         fallback_on_timeouts=True,
         fallback_on_conn_errors=True,
         cooldown_on_503_minutes=10,     # avoid hammering API during blackout
     )
     return {"data": orders, "source": source}
+
+
+def _cache_key(endpoint: str, params: Dict[str, Any]) -> str:
+    # Stable cache key (endpoint + sorted params)
+    return f"{endpoint}:{json.dumps(params, sort_keys=True, separators=(',', ':'))}"
+
+def fetch_with_stale_if_error(
+    *,
+    endpoint: str,
+    params: Dict[str, Any],
+    live_call: Callable[[str, Dict[str, Any]], Any],
+    cache_get: CacheGet,
+    cache_set: CacheSet,
+    ttl_seconds: int = 1800,  # 30 min
+) -> Tuple[Any, Optional[float]]:
+    """
+    Try live fetch; on network/5xx, return cached payload if present.
+    Returns (payload, cached_at_epoch or None if fresh).
+    """
+    key = _cache_key(endpoint, params)
+    try:
+        data = live_call(endpoint, params)
+        # On success, cache it with a timestamp wrapper
+        wrapper = {"payload": data, "cached_at": time.time()}
+        cache_set(key, json.dumps(wrapper), ttl_seconds)
+        return data, None  # fresh
+    except Exception as exc:
+        # Check for 5xx / network errors specifically
+        is_5xx = False
+        if isinstance(exc, requests.HTTPError) and exc.response is not None:
+            is_5xx = exc.response.status_code in DANGEROUS_STATUS
+
+        if is_5xx or isinstance(exc, (requests.ConnectionError, requests.Timeout, requests.RequestException)):
+            raw = cache_get(key)
+            if raw:
+                try:
+                    wrapper = json.loads(raw)
+                    payload = wrapper.get("payload")
+                    cached_at = float(wrapper.get("cached_at") or 0.0)
+                except Exception:
+                    payload, cached_at = json.loads(raw), 0.0
+                current_app.logger.warning("Upstream failed (%s). Serving cached data for %s", exc, key)
+                return payload, cached_at
+
+        # No cache or not a recoverable error → re-raise
+        raise
