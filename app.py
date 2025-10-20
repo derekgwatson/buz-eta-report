@@ -119,6 +119,8 @@ def create_app(testing: bool = False) -> tuple[Flask, str]:
         from config import DevConfig as Cfg
     elif env == "production":
         from config import ProdConfig as Cfg
+    elif env == "prod":
+        from config import ProdConfig as Cfg
     elif env == "staging":
         from config import StagingConfig as Cfg
     else:
