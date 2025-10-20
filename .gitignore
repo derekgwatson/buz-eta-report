@@ -22,7 +22,7 @@ run.bat
 # Other
 customers.db
 customers.db.backup
-
+db-backup-*
 
 # Ignore everything in instance (runtime data)
 instance/

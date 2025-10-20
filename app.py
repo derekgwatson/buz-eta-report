@@ -48,7 +48,6 @@ from services.migrations import run_migrations
 from services.eta_report import build_eta_report_context
 from services.buz_data import get_data_by_order_no, get_open_orders, get_open_orders_by_group
 from services.job_service import create_job, update_job, get_job
-import click
 
 import secrets, threading
 from services.eta_worker import run_eta_job
@@ -62,6 +61,9 @@ from services.export import (
     fetch_report_rows_and_name,
     safe_base_filename,
 )
+import click, sqlite3
+from services.migrations import _backup_sqlite
+
 
 STALL_TTL = 20  # seconds without updates
 
@@ -180,6 +182,17 @@ def create_app(testing: bool = False) -> tuple[Flask, str]:
 
     # Background executor
     app.executor = ThreadPoolExecutor(max_workers=2)
+
+    @app.cli.command("db-backup")
+    @click.option("--dir", "backup_dir", default=None, help="Optional directory for backup file")
+    def db_backup_cmd(backup_dir):
+        db_path = app.config["DATABASE"]
+        conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            path = _backup_sqlite(conn, backup_dir=backup_dir)
+            click.echo(f"Backup created: {path}")
+        finally:
+            conn.close()
 
     @atexit.register
     def _shutdown_executor():
