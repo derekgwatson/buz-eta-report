@@ -24,12 +24,17 @@ class TimeoutSession(requests.Session):
 def _session_with_retries() -> requests.Session:
     s = TimeoutSession()
     retry = Retry(
-        total=3, backoff_factor=0.5,
+        total=1,               # 1 retry max (fast fail)
+        connect=1,             # retry only on connect errors
+        read=0,                # do NOT retry long reads (keeps time bounded)
+        status=1,              # retry on 5xx/429 once
+        backoff_factor=0.5,
         status_forcelist=(429, 500, 502, 503, 504),
-        allowed_methods=frozenset(["GET"])
+        allowed_methods=frozenset(["GET"]),
+        raise_on_status=False,
     )
     adapter = HTTPAdapter(max_retries=retry, pool_connections=10, pool_maxsize=10)
-    s.mount("http://", adapter);
+    s.mount("http://", adapter)
     s.mount("https://", adapter)
     return s
 
