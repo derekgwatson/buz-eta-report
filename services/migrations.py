@@ -106,10 +106,73 @@ def _migration_3_baseline_schema(conn) -> None:
         raise RuntimeError(f"Baseline mismatch: customers missing columns: {sorted(missing)}")
     # We *could* assert triggers here, but they’re added in v2; don’t fail if absent.
 
+
+def _migration_4_customer_to_customer_name(conn) -> None:
+    # Turn off FK checks during the swap (ok even if you don't have FKs)
+    conn.execute("PRAGMA foreign_keys = OFF;")
+
+    conn.executescript("""
+        -- Drop old triggers (table is about to be rebuilt)
+        DROP TRIGGER IF EXISTS customers_field_type_check_insert;
+        DROP TRIGGER IF EXISTS customers_field_type_check_update;
+
+        -- Rebuild table with new default
+        CREATE TABLE customers_new (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            dd_name TEXT,
+            cbr_name TEXT,
+            obfuscated_id TEXT NOT NULL UNIQUE,
+            field_type TEXT NOT NULL DEFAULT 'Customer Name'
+        );
+
+        -- Copy data, coercing legacy/null/blank to the new default
+        INSERT INTO customers_new (id, dd_name, cbr_name, obfuscated_id, field_type)
+        SELECT
+            id, dd_name, cbr_name, obfuscated_id,
+            CASE
+                WHEN field_type IS NULL OR TRIM(field_type) = '' OR field_type = 'Customer'
+                    THEN 'Customer Name'
+                ELSE field_type
+            END
+        FROM customers;
+
+        -- Swap tables
+        DROP TABLE customers;
+        ALTER TABLE customers_new RENAME TO customers;
+
+        -- Recreate triggers with the new allowed set
+        CREATE TRIGGER customers_field_type_check_insert
+        BEFORE INSERT ON customers
+        FOR EACH ROW
+        WHEN NEW.field_type NOT IN ('Customer Name', 'Customer Group')
+        BEGIN
+          SELECT RAISE(ABORT, 'invalid field_type');
+        END;
+
+        CREATE TRIGGER customers_field_type_check_update
+        BEFORE UPDATE OF field_type ON customers
+        FOR EACH ROW
+        WHEN NEW.field_type NOT IN ('Customer Name', 'Customer Group')
+        BEGIN
+          SELECT RAISE(ABORT, 'invalid field_type');
+        END;
+    """)
+
+    # Restore AUTOINCREMENT sequence (optional, but keeps ids monotonic)
+    conn.execute("""
+        UPDATE sqlite_sequence
+           SET seq = (SELECT COALESCE(MAX(id), 0) FROM customers)
+         WHERE name = 'customers';
+    """)
+
+    conn.execute("PRAGMA foreign_keys = ON;")
+
+
 MIGRATIONS: List[Tuple[int, Callable]] = [
     (1, _migration_1_init_schema),
     (2, _migration_2_add_field_type),
     (3, _migration_3_baseline_schema),
+    (4, _migration_4_customer_to_customer_name),
 ]
 
 CURRENT_SCHEMA_VERSION = max(v for v, _ in MIGRATIONS)
