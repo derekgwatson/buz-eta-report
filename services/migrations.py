@@ -180,11 +180,13 @@ CURRENT_SCHEMA_VERSION = max(v for v, _ in MIGRATIONS)
 
 def run_migrations(conn, *, make_backup: bool = True, logger=None) -> None:
     cur_version = _get_user_version(conn)
-    if logger: logger.info("DB migrations: current user_version=%s", cur_version)
+    if logger:
+        logger.info("DB migrations: current user_version=%s", cur_version)
 
     pending = [(v, m) for (v, m) in MIGRATIONS if v > cur_version]
     if not pending:
-        if logger: logger.info("DB migrations: up-to-date.")
+        if logger:
+            logger.info("DB migrations: up-to-date.")
         return
 
     if make_backup:
@@ -195,14 +197,17 @@ def run_migrations(conn, *, make_backup: bool = True, logger=None) -> None:
             if logger: logger.warning("Backup failed (%s). Proceeding without backup.", e)
 
     for v, migration in sorted(pending, key=lambda x: x[0]):
-        if logger: logger.info("Applying DB migration v%s ...", v)
+        if logger:
+            logger.info("Applying DB migration v%s ...", v)
         conn.execute("BEGIN IMMEDIATE")
         try:
             migration(conn)
             _set_user_version(conn, v)
             conn.commit()
-            if logger: logger.info("Migration v%s complete.", v)
+            if logger:
+                logger.info("Migration v%s complete.", v)
         except Exception:
             conn.rollback()
-            if logger: logger.exception("Migration v%s failed; rolled back.", v)
+            if logger:
+                logger.exception("Migration v%s failed; rolled back.", v)
             raise
