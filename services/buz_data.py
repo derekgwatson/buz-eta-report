@@ -95,12 +95,12 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
 def get_customers_by_group(customer_group: str, instance: str) -> list[dict]:
     """
     Return customers in a given Buz customer group.
-    NOTE: Use 'OrderStatus' (no underscore) to match other queries in this file.
+    NOTE: SalesReport endpoint uses 'Order_Status' (with underscore), unlike JobsScheduleDetailed which uses 'OrderStatus'.
     """
     odata_client = ODataClient(instance)
     filter_conditions = [
-        "OrderStatus eq 'Work in Progress'",
-        f"CustomerGroup eq '{customer_group}'",
+        "Order_Status eq 'Work in Progress'",
+        f"CustomerGroup eq {odata_quote(customer_group)}",
     ]
     return odata_client.get("SalesReport", filter_conditions) or []
 
