@@ -104,7 +104,8 @@ class ODataClient:
             response.raise_for_status()
 
         except requests.exceptions.RequestException as e:
-            logging.error(f"GET request failed: {e}")
+            # Don't log here - let the caller (fetcher.py) decide how to handle/log
+            # fetcher.py will log as WARNING and fall back to cache if available
             raise
 
         # Process and reformat dates
