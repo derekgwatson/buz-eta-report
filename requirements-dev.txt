@@ -25,5 +25,6 @@ python-dateutil>=2.9.0.post0
 sentry-sdk
 
 # Testing
-pytest-flask==1.3.0
-pytest
+pytest>=8.0.0
+pytest-flask>=1.3.0
+openpyxl>=3.0.0
