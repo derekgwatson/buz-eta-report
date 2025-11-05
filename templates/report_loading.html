@@ -3,13 +3,25 @@
 {% block content %}
 <div class="container py-4">
   <h3 class="mb-3">Generating your report…</h3>
-  <div id="progress" class="text-muted">Starting…</div>
+  <div id="status" class="text-muted mb-3" style="font-size: 1.1em;">Starting…</div>
+  <div id="spinner" class="spinner-border text-primary" role="status">
+    <span class="sr-only">Loading...</span>
+  </div>
 </div>
+
+<style>
+  .spinner-border {
+    width: 3rem;
+    height: 3rem;
+    border-width: 0.3em;
+  }
+</style>
 
 <script>
 (function() {
   const jobId = "{{ job_id }}";
-  const progressEl = document.getElementById('progress');
+  const statusEl = document.getElementById('status');
+  const spinnerEl = document.getElementById('spinner');
 
   function htmlEscape(s){ return (s||"").toString().replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
 
@@ -19,10 +31,10 @@
       if (!res.ok) throw new Error("status " + res.status);
       const data = await res.json();
 
-      // Show progress/log
-      const pct = data.pct ?? 0;
-      const logs = Array.isArray(data.log) ? data.log.slice(-5) : [];
-      progressEl.innerHTML = `Progress: ${pct}%<br>` + logs.map(htmlEscape).join("<br>");
+      // Show current status (just the latest log message)
+      const logs = Array.isArray(data.log) ? data.log : [];
+      const currentStatus = logs.length > 0 ? logs[logs.length - 1] : "Working…";
+      statusEl.innerHTML = htmlEscape(currentStatus);
 
       if (data.status === "completed") {
         // Navigate to the final rendered report
@@ -31,15 +43,17 @@
       }
 
       if (data.status === "failed") {
+        spinnerEl.style.display = 'none';
         let html = `<span class="text-danger">Failed: ${htmlEscape(data.error||"Unknown error")}</span>`;
         if (data.traceback) {
           html += `<pre class="mt-3 text-muted small">${htmlEscape(data.traceback)}</pre>`;
         }
-        progressEl.innerHTML = html;
+        statusEl.innerHTML = html;
         return;
       }
     } catch (e) {
-      progressEl.innerHTML = `<span class="text-danger">Polling error: ${htmlEscape(e.message)}</span>`;
+      spinnerEl.style.display = 'none';
+      statusEl.innerHTML = `<span class="text-danger">Polling error: ${htmlEscape(e.message)}</span>`;
     }
     setTimeout(poll, 1200);
   }
