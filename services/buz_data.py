@@ -68,59 +68,71 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
 
     # Debug: Log available columns to help identify the correct field name
     from flask import current_app
+    import os
+
+    # Temporarily disabled - uncomment to enable filtering
+    ENABLE_FILTERING = os.getenv('ENABLE_CANCELLED_INVOICED_FILTER', 'false').lower() == 'true'
+
     if current_app:
         current_app.logger.info(f"Available columns in OData response: {list(df.columns)}")
-        if 'Workflow_Job_Tracking_Status' in df.columns:
-            current_app.logger.info(f"Sample Workflow_Job_Tracking_Status values: {df['Workflow_Job_Tracking_Status'].value_counts()}")
+        current_app.logger.info(f"Cancelled/Invoiced filtering: {'ENABLED' if ENABLE_FILTERING else 'DISABLED'}")
 
-    # Filter out orders where ALL non-null job tracking statuses are cancelled or invoiced
-    # Check for the field with various possible casings
-    workflow_field = None
-    for col in df.columns:
-        if col.lower() == 'workflow_job_tracking_status':
-            workflow_field = col
-            break
-
-    if workflow_field:
+    if not ENABLE_FILTERING:
         if current_app:
-            current_app.logger.info(f"Using workflow field: {workflow_field}")
-
-        def should_exclude_order(order_df):
-            """Return True if ALL non-null job tracking statuses are cancelled or invoiced"""
-            # Get all non-null job tracking statuses
-            statuses = order_df[workflow_field].dropna()
-
-            # If there are no non-null statuses, keep the order (can't determine if finished)
-            if len(statuses) == 0:
-                return False
-
-            # Check if ALL non-null statuses are 'Cancelled' or 'Invoiced' (case-insensitive)
-            finished_statuses = {'cancelled', 'invoiced'}
-            all_finished = all(str(s).strip().lower() in finished_statuses for s in statuses)
-
-            return all_finished
-
-        # Filter out orders where all lines are finished
-        orders_to_keep = []
-        orders_filtered = []
-        for ref_no, order_group in df.groupby('RefNo'):
-            if not should_exclude_order(order_group):
-                orders_to_keep.append(ref_no)
-            else:
-                orders_filtered.append(ref_no)
-
-        if current_app and orders_filtered:
-            current_app.logger.info(f"Filtered out {len(orders_filtered)} fully invoiced/cancelled orders: {orders_filtered[:5]}")
-
-        df = df[df['RefNo'].isin(orders_to_keep)]
-
-        if df.empty:
-            if current_app:
-                current_app.logger.warning("All orders were filtered out!")
-            return []
+            current_app.logger.info("Skipping cancelled/invoiced filtering (disabled)")
     else:
-        if current_app:
-            current_app.logger.info("Workflow_Job_Tracking_Status field not found - skipping filtering")
+        if 'Workflow_Job_Tracking_Status' in df.columns:
+            if current_app:
+                current_app.logger.info(f"Sample Workflow_Job_Tracking_Status values: {df['Workflow_Job_Tracking_Status'].value_counts()}")
+
+        # Filter out orders where ALL non-null job tracking statuses are cancelled or invoiced
+        # Check for the field with various possible casings
+        workflow_field = None
+        for col in df.columns:
+            if col.lower() == 'workflow_job_tracking_status':
+                workflow_field = col
+                break
+
+        if workflow_field:
+            if current_app:
+                current_app.logger.info(f"Using workflow field: {workflow_field}")
+
+            def should_exclude_order(order_df):
+                """Return True if ALL non-null job tracking statuses are cancelled or invoiced"""
+                # Get all non-null job tracking statuses
+                statuses = order_df[workflow_field].dropna()
+
+                # If there are no non-null statuses, keep the order (can't determine if finished)
+                if len(statuses) == 0:
+                    return False
+
+                # Check if ALL non-null statuses are 'Cancelled' or 'Invoiced' (case-insensitive)
+                finished_statuses = {'cancelled', 'invoiced'}
+                all_finished = all(str(s).strip().lower() in finished_statuses for s in statuses)
+
+                return all_finished
+
+            # Filter out orders where all lines are finished
+            orders_to_keep = []
+            orders_filtered = []
+            for ref_no, order_group in df.groupby('RefNo'):
+                if not should_exclude_order(order_group):
+                    orders_to_keep.append(ref_no)
+                else:
+                    orders_filtered.append(ref_no)
+
+            if current_app and orders_filtered:
+                current_app.logger.info(f"Filtered out {len(orders_filtered)} fully invoiced/cancelled orders: {orders_filtered[:5]}")
+
+            df = df[df['RefNo'].isin(orders_to_keep)]
+
+            if df.empty:
+                if current_app:
+                    current_app.logger.warning("All orders were filtered out!")
+                return []
+        else:
+            if current_app:
+                current_app.logger.info("Workflow_Job_Tracking_Status field not found - skipping filtering")
 
     # Fetch active status mappings from the database
     cursor = conn.cursor()
