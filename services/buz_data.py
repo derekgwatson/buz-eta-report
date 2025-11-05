@@ -66,6 +66,55 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
         if col not in df.columns:
             df[col] = None
 
+    # Filter out orders where ALL non-null ProductionStatus values are cancelled or invoiced
+    from flask import current_app
+    import os
+
+    ENABLE_FILTERING = os.getenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true').lower() == 'true'
+
+    if current_app:
+        current_app.logger.info(f"Cancelled/Invoiced filtering: {'ENABLED' if ENABLE_FILTERING else 'DISABLED'}")
+
+    if ENABLE_FILTERING and 'ProductionStatus' in df.columns:
+        if current_app:
+            current_app.logger.info(f"Sample ProductionStatus values: {df['ProductionStatus'].value_counts().to_dict()}")
+
+        def should_exclude_order(order_df):
+            """Return True if ALL non-null ProductionStatus values are cancelled or invoiced"""
+            # Get all non-null production statuses
+            statuses = order_df['ProductionStatus'].dropna()
+
+            # If there are no non-null statuses, keep the order (can't determine if finished)
+            if len(statuses) == 0:
+                return False
+
+            # Check if ALL non-null statuses are 'Cancelled' or 'Invoiced' (case-insensitive)
+            finished_statuses = {'cancelled', 'invoiced'}
+            all_finished = all(str(s).strip().lower() in finished_statuses for s in statuses)
+
+            return all_finished
+
+        # Filter out orders where all lines are finished
+        orders_to_keep = []
+        orders_filtered = []
+        for ref_no, order_group in df.groupby('RefNo'):
+            if not should_exclude_order(order_group):
+                orders_to_keep.append(ref_no)
+            else:
+                orders_filtered.append(ref_no)
+
+        if current_app and orders_filtered:
+            current_app.logger.info(f"Filtered out {len(orders_filtered)} fully invoiced/cancelled orders: {orders_filtered[:5]}")
+
+        df = df[df['RefNo'].isin(orders_to_keep)]
+
+        if df.empty:
+            if current_app:
+                current_app.logger.warning("All orders were filtered out - this might be correct if all orders are completed")
+            return []
+    elif ENABLE_FILTERING and current_app:
+        current_app.logger.warning("ProductionStatus field not found - cannot filter cancelled/invoiced orders")
+
     # Fetch active status mappings from the database
     cursor = conn.cursor()
     cursor.execute(''' 

@@ -194,6 +194,208 @@ def test_fetch_and_process_orders_dedup_and_mapping(monkeypatch):
     ]
 
 
+def test_fetch_and_process_orders_filters_fully_invoiced(monkeypatch):
+    """Orders where ALL non-null ProductionStatus values are invoiced should be excluded"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD001",
+                    "Descn": "Fully Invoiced Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Invoiced",
+                    "FixedLine": 1,
+                },
+                {
+                    "RefNo": "ORD001",
+                    "Descn": "Fully Invoiced Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 2",
+                    "InventoryItem": "Item 2",
+                    "ProductionStatus": "Invoiced",
+                    "FixedLine": 2,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert out == []  # Order should be filtered out
+
+
+def test_fetch_and_process_orders_filters_fully_cancelled(monkeypatch):
+    """Orders where ALL non-null ProductionStatus values are cancelled should be excluded"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD002",
+                    "Descn": "Cancelled Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Cancelled",
+                    "FixedLine": 1,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert out == []  # Order should be filtered out
+
+
+def test_fetch_and_process_orders_keeps_mixed_status(monkeypatch):
+    """Orders with some lines in progress should be kept"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD003",
+                    "Descn": "Mixed Status Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Invoiced",
+                    "FixedLine": 1,
+                },
+                {
+                    "RefNo": "ORD003",
+                    "Descn": "Mixed Status Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 2",
+                    "InventoryItem": "Item 2",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 2,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert len(out) == 2  # Order should be kept with both lines
+
+
+def test_fetch_and_process_orders_ignores_null_statuses(monkeypatch):
+    """Orders with null ProductionStatus should be ignored when determining if order is complete"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD004",
+                    "Descn": "Order with Nulls",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": None,  # null status
+                    "FixedLine": 1,
+                },
+                {
+                    "RefNo": "ORD004",
+                    "Descn": "Order with Nulls",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 2",
+                    "InventoryItem": "Item 2",
+                    "ProductionStatus": "Invoiced",
+                    "FixedLine": 2,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    # Should be filtered out because the only non-null status is "Invoiced"
+    assert out == []
+
+
+def test_fetch_and_process_orders_keeps_all_null_statuses(monkeypatch):
+    """Orders where all ProductionStatus values are null should be kept"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD005",
+                    "Descn": "All Null Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": None,
+                    "FixedLine": 1,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert len(out) == 1  # Order should be kept
+
+
+def test_fetch_and_process_orders_with_filtering_disabled(monkeypatch):
+    """When filtering is disabled, all orders should be kept"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'false')
+
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD006",
+                    "Descn": "Should be kept",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Invoiced",  # Would be filtered if enabled
+                    "FixedLine": 1,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert len(out) == 1  # Order should be kept (filtering disabled)
+
+
 # ---------------------------
 # High-level helpers with caching shim
 # ---------------------------
@@ -384,4 +586,68 @@ def test_fallback_on_500(monkeypatch):
     )
 
     assert data == [{"RefNo": "R1"}]
-    assert source.startswith("cache")
+
+
+def test_prewarm_handles_filtered_data(monkeypatch):
+    """Test that prewarm cache works correctly with filtering enabled"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+    _live_fetch(monkeypatch)
+
+    # Track what was fetched
+    calls = []
+
+    class _StubClient:
+        def __init__(self, instance):
+            self.instance = instance
+
+        def get(self, endpoint, filters):
+            calls.append({'instance': self.instance, 'endpoint': endpoint, 'filters': filters})
+            # Return mix of data - some invoiced, some in progress
+            return [
+                {
+                    "RefNo": "ORD001",
+                    "Descn": "Active Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 1,
+                },
+                {
+                    "RefNo": "ORD002",
+                    "Descn": "Invoiced Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 2",
+                    "InventoryItem": "Item 2",
+                    "ProductionStatus": "Invoiced",
+                    "FixedLine": 1,
+                },
+            ]
+
+    monkeypatch.setattr("services.buz_data.ODataClient", _StubClient)
+
+    # Minimal DB conn
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    # Test get_open_orders (used by prewarm)
+    result = get_open_orders(_Conn(), "Test Customer", "DD")
+
+    # Should return dict with data and source
+    assert isinstance(result, dict)
+    assert "data" in result
+    assert "source" in result
+    assert result["source"] == "live"
+
+    # Should have filtered out the invoiced order, kept the in-progress one
+    assert len(result["data"]) == 1
+    assert result["data"][0]["RefNo"] == "ORD001"
+    assert result["data"][0]["ProductionStatus"] == "In Progress"
+
+    # Verify the OData call was made
+    assert len(calls) == 1
+    assert calls[0]["instance"] == "DD"

@@ -622,20 +622,20 @@ def delete_customer(customer_id):
 def edit_customer(customer_id):
     if request.method == 'POST':
         # Fetch updated form data
-        name = request.form['name']
-        url = request.form['url']
-        title = request.form['title']
+        dd_name = request.form.get('dd_name', '').strip() or None
+        cbr_name = request.form.get('cbr_name', '').strip() or None
+        field_type = request.form.get('field_type', 'Customer Name')
 
         # Update the customer in the database
         query_db(
-            "UPDATE customers SET name = ?, url = ?, title = ? WHERE id = ?",
-            (name, url, title, customer_id),
+            "UPDATE customers SET dd_name = ?, cbr_name = ?, field_type = ? WHERE id = ?",
+            (dd_name, cbr_name, field_type, customer_id),
         )
         return redirect(url_for('admin'))
 
     # Fetch customer details for pre-filling the form
     customer = query_db(
-        "SELECT id, name, url, title FROM customers WHERE id = ?", (customer_id,), one=True
+        "SELECT id, dd_name, cbr_name, obfuscated_id, field_type FROM customers WHERE id = ?", (customer_id,), one=True
     )
     if not customer:
         return "Customer not found", 404
@@ -710,6 +710,30 @@ def initialize_database():
     run_migrations(conn, make_backup=True, logger=app.logger)  # customers table + versioning
     create_db_tables(conn=conn)  # users/status_mapping/jobs
     print("Database ready.")
+
+
+@app.cli.command("clear-cache")
+@click.option("--confirm", is_flag=True, help="Confirm cache deletion")
+@click.option("--jobs", is_flag=True, help="Also clear job history")
+def clear_cache_command(confirm, jobs):
+    """Clear all cached data from the database."""
+    if not confirm:
+        print("This will delete all cached data" + (" and job history" if jobs else "") + ".")
+        print("Run with --confirm to proceed: flask clear-cache --confirm" + (" --jobs" if jobs else ""))
+        return
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cache")
+    cache_deleted = cursor.rowcount
+
+    jobs_deleted = 0
+    if jobs:
+        cursor.execute("DELETE FROM jobs")
+        jobs_deleted = cursor.rowcount
+
+    conn.commit()
+    print(f"Cleared {cache_deleted} cache entries" + (f" and {jobs_deleted} job records." if jobs else "."))
 
 
 @app.cli.command("prewarm-cache")

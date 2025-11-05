@@ -123,17 +123,52 @@ def build_eta_report_context(
     cbr_name = row["cbr_name"]
     field_type = row["field_type"]
 
-    _prog(progress, "Fetching orders…", 20)
-    if field_type == "Customer Group":
-        data_dd_raw = get_open_orders_by_group(db, dd_name, "DD") if dd_name else []
-        data_cbr_raw = get_open_orders_by_group(db, cbr_name, "CBR") if cbr_name else []
-    else:
-        data_dd_raw = get_open_orders(db, dd_name, "DD") if dd_name else []
-        data_cbr_raw = get_open_orders(db, cbr_name, "CBR") if cbr_name else []
+    # Determine if we need to fetch from both sources
+    has_both = bool(dd_name) and bool(cbr_name)
 
-    # Normalize to lists
+    _prog(progress, "Fetching orders from API…", 10)
+
+    # Fetch data from DD (if configured)
+    # NOTE: Will sit at 10% during this long API call
+    if dd_name:
+        if field_type == "Customer Group":
+            data_dd_raw = get_open_orders_by_group(db, dd_name, "DD")
+        else:
+            data_dd_raw = get_open_orders(db, dd_name, "DD")
+        # After DD fetch completes, jump to 50% if we have both, or 80% if DD only
+        _prog(progress, "DD data received", 50 if has_both else 80)
+    else:
+        data_dd_raw = {"data": [], "source": "live"}
+
+    # Fetch data from CBR (if configured)
+    # NOTE: Will sit at 50% during this long API call (if both sources)
+    if cbr_name:
+        if field_type == "Customer Group":
+            data_cbr_raw = get_open_orders_by_group(db, cbr_name, "CBR")
+        else:
+            data_cbr_raw = get_open_orders(db, cbr_name, "CBR")
+        # After CBR fetch completes, jump to 80%
+        _prog(progress, "CBR data received", 80)
+    else:
+        data_cbr_raw = {"data": [], "source": "live"}
+
+    _prog(progress, "Processing data…", 85)
+
+    # Extract data and source information
     data_dd = _to_list_of_dicts(data_dd_raw)
     data_cbr = _to_list_of_dicts(data_cbr_raw)
+
+    # Track data source (live vs cached)
+    source_dd = data_dd_raw.get("source", "live") if isinstance(data_dd_raw, dict) else "live"
+    source_cbr = data_cbr_raw.get("source", "live") if isinstance(data_cbr_raw, dict) else "live"
+
+    # Overall source: if either is cached, show cached
+    if source_dd == "live" and source_cbr == "live":
+        overall_source = "live"
+    elif source_dd != "live":
+        overall_source = source_dd
+    else:
+        overall_source = source_cbr
 
     # In dev, fail fast with a clear message if not lists
     assert isinstance(data_dd, list) and isinstance(data_cbr, list), \
@@ -141,10 +176,10 @@ def build_eta_report_context(
 
     combined_data = data_cbr + data_dd
 
-    _prog(progress, "Grouping by RefNo…", 40)
+    _prog(progress, "Grouping data…", 90)
     grouped_data = _combine_and_group(combined_data)
 
-    _prog(progress, "Preparing filters…", 60)
+    _prog(progress, "Finalizing…", 95)
     customer_name = _make_customer_name(dd_name or "", cbr_name or "")
     unique_statuses = _normalize_and_sort([i.get("ProductionStatus", "N/A") for i in combined_data])
     unique_groups = _normalize_and_sort([i.get("ProductionLine", "N/A") for i in combined_data])
@@ -157,7 +192,10 @@ def build_eta_report_context(
         "groups": unique_groups,
         "suppliers": unique_suppliers,
         "obfuscated_id": obfuscated_id,
+        "source": overall_source,
+        "last_dd": None,  # TODO: Extract from cache metadata if needed
+        "last_cbr": None,  # TODO: Extract from cache metadata if needed
     }
 
-    _prog(progress, "Ready.", 95)
+    _prog(progress, "Complete", 100)
     return "report.html", ctx, 200
