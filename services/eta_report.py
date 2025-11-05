@@ -123,13 +123,29 @@ def build_eta_report_context(
     cbr_name = row["cbr_name"]
     field_type = row["field_type"]
 
-    _prog(progress, "Fetching orders…", 20)
-    if field_type == "Customer Group":
-        data_dd_raw = get_open_orders_by_group(db, dd_name, "DD") if dd_name else {"data": [], "source": "live"}
-        data_cbr_raw = get_open_orders_by_group(db, cbr_name, "CBR") if cbr_name else {"data": [], "source": "live"}
+    # Fetch data from DD (if configured)
+    if dd_name:
+        _prog(progress, "Fetching DD orders…", 15)
+        if field_type == "Customer Group":
+            data_dd_raw = get_open_orders_by_group(db, dd_name, "DD")
+        else:
+            data_dd_raw = get_open_orders(db, dd_name, "DD")
+        _prog(progress, "DD orders fetched", 30)
     else:
-        data_dd_raw = get_open_orders(db, dd_name, "DD") if dd_name else {"data": [], "source": "live"}
-        data_cbr_raw = get_open_orders(db, cbr_name, "CBR") if cbr_name else {"data": [], "source": "live"}
+        data_dd_raw = {"data": [], "source": "live"}
+
+    # Fetch data from CBR (if configured)
+    if cbr_name:
+        _prog(progress, "Fetching CBR orders…", 35)
+        if field_type == "Customer Group":
+            data_cbr_raw = get_open_orders_by_group(db, cbr_name, "CBR")
+        else:
+            data_cbr_raw = get_open_orders(db, cbr_name, "CBR")
+        _prog(progress, "CBR orders fetched", 50)
+    else:
+        data_cbr_raw = {"data": [], "source": "live"}
+
+    _prog(progress, "Processing data…", 55)
 
     # Extract data and source information
     data_dd = _to_list_of_dicts(data_dd_raw)
@@ -153,10 +169,10 @@ def build_eta_report_context(
 
     combined_data = data_cbr + data_dd
 
-    _prog(progress, "Grouping by RefNo…", 40)
+    _prog(progress, "Grouping by RefNo…", 60)
     grouped_data = _combine_and_group(combined_data)
 
-    _prog(progress, "Preparing filters…", 60)
+    _prog(progress, "Preparing filters…", 75)
     customer_name = _make_customer_name(dd_name or "", cbr_name or "")
     unique_statuses = _normalize_and_sort([i.get("ProductionStatus", "N/A") for i in combined_data])
     unique_groups = _normalize_and_sort([i.get("ProductionLine", "N/A") for i in combined_data])
@@ -174,5 +190,5 @@ def build_eta_report_context(
         "last_cbr": None,  # TODO: Extract from cache metadata if needed
     }
 
-    _prog(progress, "Ready.", 95)
+    _prog(progress, "Complete", 100)
     return "report.html", ctx, 200
