@@ -66,6 +66,34 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
         if col not in df.columns:
             df[col] = None
 
+    # Filter out orders where ALL non-null job tracking statuses are cancelled or invoiced
+    if 'Workflow_Job_Tracking_Status' in df.columns:
+        def should_exclude_order(order_df):
+            """Return True if ALL non-null job tracking statuses are cancelled or invoiced"""
+            # Get all non-null job tracking statuses
+            statuses = order_df['Workflow_Job_Tracking_Status'].dropna()
+
+            # If there are no non-null statuses, keep the order (can't determine if finished)
+            if len(statuses) == 0:
+                return False
+
+            # Check if ALL non-null statuses are 'Cancelled' or 'Invoiced' (case-insensitive)
+            finished_statuses = {'cancelled', 'invoiced'}
+            all_finished = all(str(s).strip().lower() in finished_statuses for s in statuses)
+
+            return all_finished
+
+        # Filter out orders where all lines are finished
+        orders_to_keep = []
+        for ref_no, order_group in df.groupby('RefNo'):
+            if not should_exclude_order(order_group):
+                orders_to_keep.append(ref_no)
+
+        df = df[df['RefNo'].isin(orders_to_keep)]
+
+        if df.empty:
+            return []
+
     # Fetch active status mappings from the database
     cursor = conn.cursor()
     cursor.execute(''' 

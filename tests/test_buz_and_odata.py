@@ -194,6 +194,204 @@ def test_fetch_and_process_orders_dedup_and_mapping(monkeypatch):
     ]
 
 
+def test_fetch_and_process_orders_filters_fully_invoiced():
+    """Orders where ALL non-null job tracking statuses are invoiced should be excluded"""
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD001",
+                    "Descn": "Fully Invoiced Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Completed",
+                    "FixedLine": 1,
+                    "Workflow_Job_Tracking_Status": "Invoiced",
+                },
+                {
+                    "RefNo": "ORD001",
+                    "Descn": "Fully Invoiced Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 2",
+                    "InventoryItem": "Item 2",
+                    "ProductionStatus": "Completed",
+                    "FixedLine": 2,
+                    "Workflow_Job_Tracking_Status": "Invoiced",
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert out == []  # Order should be filtered out
+
+
+def test_fetch_and_process_orders_filters_fully_cancelled():
+    """Orders where ALL non-null job tracking statuses are cancelled should be excluded"""
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD002",
+                    "Descn": "Cancelled Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Cancelled",
+                    "FixedLine": 1,
+                    "Workflow_Job_Tracking_Status": "Cancelled",
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert out == []  # Order should be filtered out
+
+
+def test_fetch_and_process_orders_keeps_mixed_status():
+    """Orders with some lines in progress should be kept"""
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD003",
+                    "Descn": "Mixed Status Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Completed",
+                    "FixedLine": 1,
+                    "Workflow_Job_Tracking_Status": "Invoiced",
+                },
+                {
+                    "RefNo": "ORD003",
+                    "Descn": "Mixed Status Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 2",
+                    "InventoryItem": "Item 2",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 2,
+                    "Workflow_Job_Tracking_Status": "In Progress",
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert len(out) == 2  # Order should be kept with both lines
+
+
+def test_fetch_and_process_orders_ignores_null_statuses():
+    """Orders with null job tracking statuses should be ignored (neither counted as finished nor unfinished)"""
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD004",
+                    "Descn": "Order with Nulls",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 1,
+                    "Workflow_Job_Tracking_Status": None,  # null status
+                },
+                {
+                    "RefNo": "ORD004",
+                    "Descn": "Order with Nulls",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 2",
+                    "InventoryItem": "Item 2",
+                    "ProductionStatus": "Completed",
+                    "FixedLine": 2,
+                    "Workflow_Job_Tracking_Status": "Invoiced",
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    # Should be filtered out because the only non-null status is "Invoiced"
+    assert out == []
+
+
+def test_fetch_and_process_orders_keeps_all_null_statuses():
+    """Orders where all job tracking statuses are null should be kept"""
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD005",
+                    "Descn": "All Null Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 1,
+                    "Workflow_Job_Tracking_Status": None,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert len(out) == 1  # Order should be kept
+
+
+def test_fetch_and_process_orders_without_workflow_field():
+    """Orders without Workflow_Job_Tracking_Status field should not be filtered"""
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD006",
+                    "Descn": "No Workflow Field",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 1,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert len(out) == 1  # Order should be kept (no filtering applied)
+
+
 # ---------------------------
 # High-level helpers with caching shim
 # ---------------------------
