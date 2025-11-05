@@ -194,8 +194,10 @@ def test_fetch_and_process_orders_dedup_and_mapping(monkeypatch):
     ]
 
 
-def test_fetch_and_process_orders_filters_fully_invoiced():
-    """Orders where ALL non-null job tracking statuses are invoiced should be excluded"""
+def test_fetch_and_process_orders_filters_fully_invoiced(monkeypatch):
+    """Orders where ALL non-null ProductionStatus values are invoiced should be excluded"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
     class _StubClient:
         def get(self, endpoint, filters):
             return [
@@ -205,9 +207,8 @@ def test_fetch_and_process_orders_filters_fully_invoiced():
                     "DateScheduled": "2024-12-01",
                     "ProductionLine": "Line 1",
                     "InventoryItem": "Item 1",
-                    "ProductionStatus": "Completed",
+                    "ProductionStatus": "Invoiced",
                     "FixedLine": 1,
-                    "Workflow_Job_Tracking_Status": "Invoiced",
                 },
                 {
                     "RefNo": "ORD001",
@@ -215,9 +216,8 @@ def test_fetch_and_process_orders_filters_fully_invoiced():
                     "DateScheduled": "2024-12-01",
                     "ProductionLine": "Line 2",
                     "InventoryItem": "Item 2",
-                    "ProductionStatus": "Completed",
+                    "ProductionStatus": "Invoiced",
                     "FixedLine": 2,
-                    "Workflow_Job_Tracking_Status": "Invoiced",
                 },
             ]
 
@@ -232,8 +232,10 @@ def test_fetch_and_process_orders_filters_fully_invoiced():
     assert out == []  # Order should be filtered out
 
 
-def test_fetch_and_process_orders_filters_fully_cancelled():
-    """Orders where ALL non-null job tracking statuses are cancelled should be excluded"""
+def test_fetch_and_process_orders_filters_fully_cancelled(monkeypatch):
+    """Orders where ALL non-null ProductionStatus values are cancelled should be excluded"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
     class _StubClient:
         def get(self, endpoint, filters):
             return [
@@ -245,7 +247,6 @@ def test_fetch_and_process_orders_filters_fully_cancelled():
                     "InventoryItem": "Item 1",
                     "ProductionStatus": "Cancelled",
                     "FixedLine": 1,
-                    "Workflow_Job_Tracking_Status": "Cancelled",
                 },
             ]
 
@@ -260,8 +261,10 @@ def test_fetch_and_process_orders_filters_fully_cancelled():
     assert out == []  # Order should be filtered out
 
 
-def test_fetch_and_process_orders_keeps_mixed_status():
+def test_fetch_and_process_orders_keeps_mixed_status(monkeypatch):
     """Orders with some lines in progress should be kept"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
     class _StubClient:
         def get(self, endpoint, filters):
             return [
@@ -271,9 +274,8 @@ def test_fetch_and_process_orders_keeps_mixed_status():
                     "DateScheduled": "2024-12-01",
                     "ProductionLine": "Line 1",
                     "InventoryItem": "Item 1",
-                    "ProductionStatus": "Completed",
+                    "ProductionStatus": "Invoiced",
                     "FixedLine": 1,
-                    "Workflow_Job_Tracking_Status": "Invoiced",
                 },
                 {
                     "RefNo": "ORD003",
@@ -283,7 +285,6 @@ def test_fetch_and_process_orders_keeps_mixed_status():
                     "InventoryItem": "Item 2",
                     "ProductionStatus": "In Progress",
                     "FixedLine": 2,
-                    "Workflow_Job_Tracking_Status": "In Progress",
                 },
             ]
 
@@ -298,8 +299,10 @@ def test_fetch_and_process_orders_keeps_mixed_status():
     assert len(out) == 2  # Order should be kept with both lines
 
 
-def test_fetch_and_process_orders_ignores_null_statuses():
-    """Orders with null job tracking statuses should be ignored (neither counted as finished nor unfinished)"""
+def test_fetch_and_process_orders_ignores_null_statuses(monkeypatch):
+    """Orders with null ProductionStatus should be ignored when determining if order is complete"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
     class _StubClient:
         def get(self, endpoint, filters):
             return [
@@ -309,9 +312,8 @@ def test_fetch_and_process_orders_ignores_null_statuses():
                     "DateScheduled": "2024-12-01",
                     "ProductionLine": "Line 1",
                     "InventoryItem": "Item 1",
-                    "ProductionStatus": "In Progress",
+                    "ProductionStatus": None,  # null status
                     "FixedLine": 1,
-                    "Workflow_Job_Tracking_Status": None,  # null status
                 },
                 {
                     "RefNo": "ORD004",
@@ -319,9 +321,8 @@ def test_fetch_and_process_orders_ignores_null_statuses():
                     "DateScheduled": "2024-12-01",
                     "ProductionLine": "Line 2",
                     "InventoryItem": "Item 2",
-                    "ProductionStatus": "Completed",
+                    "ProductionStatus": "Invoiced",
                     "FixedLine": 2,
-                    "Workflow_Job_Tracking_Status": "Invoiced",
                 },
             ]
 
@@ -337,8 +338,10 @@ def test_fetch_and_process_orders_ignores_null_statuses():
     assert out == []
 
 
-def test_fetch_and_process_orders_keeps_all_null_statuses():
-    """Orders where all job tracking statuses are null should be kept"""
+def test_fetch_and_process_orders_keeps_all_null_statuses(monkeypatch):
+    """Orders where all ProductionStatus values are null should be kept"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
     class _StubClient:
         def get(self, endpoint, filters):
             return [
@@ -348,9 +351,8 @@ def test_fetch_and_process_orders_keeps_all_null_statuses():
                     "DateScheduled": "2024-12-01",
                     "ProductionLine": "Line 1",
                     "InventoryItem": "Item 1",
-                    "ProductionStatus": "In Progress",
+                    "ProductionStatus": None,
                     "FixedLine": 1,
-                    "Workflow_Job_Tracking_Status": None,
                 },
             ]
 
@@ -365,18 +367,20 @@ def test_fetch_and_process_orders_keeps_all_null_statuses():
     assert len(out) == 1  # Order should be kept
 
 
-def test_fetch_and_process_orders_without_workflow_field():
-    """Orders without Workflow_Job_Tracking_Status field should not be filtered"""
+def test_fetch_and_process_orders_with_filtering_disabled(monkeypatch):
+    """When filtering is disabled, all orders should be kept"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'false')
+
     class _StubClient:
         def get(self, endpoint, filters):
             return [
                 {
                     "RefNo": "ORD006",
-                    "Descn": "No Workflow Field",
+                    "Descn": "Should be kept",
                     "DateScheduled": "2024-12-01",
                     "ProductionLine": "Line 1",
                     "InventoryItem": "Item 1",
-                    "ProductionStatus": "In Progress",
+                    "ProductionStatus": "Invoiced",  # Would be filtered if enabled
                     "FixedLine": 1,
                 },
             ]
@@ -389,7 +393,7 @@ def test_fetch_and_process_orders_without_workflow_field():
             return _Cur()
 
     out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
-    assert len(out) == 1  # Order should be kept (no filtering applied)
+    assert len(out) == 1  # Order should be kept (filtering disabled)
 
 
 # ---------------------------
