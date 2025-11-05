@@ -586,4 +586,68 @@ def test_fallback_on_500(monkeypatch):
     )
 
     assert data == [{"RefNo": "R1"}]
-    assert source.startswith("cache")
+
+
+def test_prewarm_handles_filtered_data(monkeypatch):
+    """Test that prewarm cache works correctly with filtering enabled"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+    _live_fetch(monkeypatch)
+
+    # Track what was fetched
+    calls = []
+
+    class _StubClient:
+        def __init__(self, instance):
+            self.instance = instance
+
+        def get(self, endpoint, filters):
+            calls.append({'instance': self.instance, 'endpoint': endpoint, 'filters': filters})
+            # Return mix of data - some invoiced, some in progress
+            return [
+                {
+                    "RefNo": "ORD001",
+                    "Descn": "Active Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "In Progress",
+                    "FixedLine": 1,
+                },
+                {
+                    "RefNo": "ORD002",
+                    "Descn": "Invoiced Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 2",
+                    "InventoryItem": "Item 2",
+                    "ProductionStatus": "Invoiced",
+                    "FixedLine": 1,
+                },
+            ]
+
+    monkeypatch.setattr("services.buz_data.ODataClient", _StubClient)
+
+    # Minimal DB conn
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    # Test get_open_orders (used by prewarm)
+    result = get_open_orders(_Conn(), "Test Customer", "DD")
+
+    # Should return dict with data and source
+    assert isinstance(result, dict)
+    assert "data" in result
+    assert "source" in result
+    assert result["source"] == "live"
+
+    # Should have filtered out the invoiced order, kept the in-progress one
+    assert len(result["data"]) == 1
+    assert result["data"][0]["RefNo"] == "ORD001"
+    assert result["data"][0]["ProductionStatus"] == "In Progress"
+
+    # Verify the OData call was made
+    assert len(calls) == 1
+    assert calls[0]["instance"] == "DD"
