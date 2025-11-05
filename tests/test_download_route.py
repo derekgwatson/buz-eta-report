@@ -4,11 +4,16 @@ import io
 import re
 from typing import Any, Dict, List, Tuple
 from openpyxl import load_workbook
+import pytest
 
-# Import the Flask app module that defines the route
-# Adjust this import if your app object lives elsewhere.
-import app as app_module
 from services import export as export_mod
+
+
+@pytest.fixture
+def app_module():
+    """Import app module after environment is set up."""
+    import app as app_module
+    return app_module
 
 
 def _rows_sample() -> List[Dict[str, Any]]:
@@ -36,7 +41,7 @@ def _rows_sample() -> List[Dict[str, Any]]:
     ]
 
 
-def test_download_csv_happy_path(client, monkeypatch):
+def test_download_csv_happy_path(client, monkeypatch, app_module):
     # Stub data fetcher: returns rows + customer name
     monkeypatch.setattr(
         app_module,
@@ -68,7 +73,7 @@ def test_download_csv_happy_path(client, monkeypatch):
     assert lines[1] == ",".join(str(v) for v in first_vals)
 
 
-def test_download_xlsx_happy_path(client, monkeypatch):
+def test_download_xlsx_happy_path(client, monkeypatch, app_module):
     monkeypatch.setattr(
         app_module,
         "fetch_report_rows_and_name",
@@ -95,13 +100,13 @@ def test_download_xlsx_happy_path(client, monkeypatch):
     assert [c.value for c in ws[2]] == [_rows_sample()[0].get(h, "") for h in headers]
 
 
-def test_download_404_when_customer_missing(client, monkeypatch):
+def test_download_404_when_customer_missing(client, monkeypatch, app_module):
     monkeypatch.setattr(app_module, "fetch_report_rows_and_name", lambda *a, **k: (None, None))
     resp = client.get("/nope/download.csv")
     assert resp.status_code == 404
 
 
-def test_download_400_when_bad_format(client, monkeypatch):
+def test_download_400_when_bad_format(client, monkeypatch, app_module):
     monkeypatch.setattr(
         app_module,
         "fetch_report_rows_and_name",
@@ -111,7 +116,7 @@ def test_download_400_when_bad_format(client, monkeypatch):
     assert resp.status_code == 400
 
 
-def test_filter_precedence_status_and_legacy_params(client, monkeypatch):
+def test_filter_precedence_status_and_legacy_params(client, monkeypatch, app_module):
     # Capture what apply_filters receives
     seen_kwargs = {}
 

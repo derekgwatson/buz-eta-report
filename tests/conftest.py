@@ -21,8 +21,9 @@ def _env(monkeypatch, tmp_path):
 
 
 @pytest.fixture
-def app():
+def app(_env):
     # import AFTER env + Sentry patch
+    # _env fixture dependency ensures environment is set up first
     import app as app_module
     import logging
     app_module.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
