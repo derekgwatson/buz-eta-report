@@ -94,17 +94,28 @@ def fetch_or_cached(
                 new_meta["last_503_at_utc"] = datetime.now(timezone.utc).isoformat(timespec="seconds")
                 set_cache(cache_key, entry.payload, meta=new_meta)
                 return entry.payload, "cache-503"
-            raise RuntimeError(f"API returned {status} and no cached data exists for {cache_key}") from exc
+            # User-friendly error message
+            raise RuntimeError(
+                "We're unable to generate your report at this time. "
+                "Our supplier data system is currently unavailable and we don't have any cached data for this customer. "
+                "Please try again in a few minutes, or contact support if this issue persists."
+            ) from exc
         raise
 
     except (Timeout,) as exc:
         if fallback_on_timeouts and entry:
             _log("warning", f"[fallback] Timeout for {cache_key}; serving cache")
             return entry.payload, "cache-timeout"
-        raise
+        raise RuntimeError(
+            "The report generation is taking longer than expected. "
+            "Our supplier data system is not responding. Please try again in a few minutes."
+        ) from exc
 
     except (ConnectionError,) as exc:
         if fallback_on_conn_errors and entry:
             _log("warning", f"[fallback] Connection error for {cache_key}; serving cache")
             return entry.payload, "cache-error"
-        raise
+        raise RuntimeError(
+            "We're having trouble connecting to our supplier data system. "
+            "Please check your internet connection and try again in a few minutes."
+        ) from exc
