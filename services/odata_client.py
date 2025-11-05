@@ -99,13 +99,27 @@ class ODataClient:
         # Join the conditions with " and "
         filter_query = " and ".join(params)
         encoded_filter = {"$filter": filter_query}
+
+        # Log the full URL for debugging
+        try:
+            from flask import current_app
+            if current_app:
+                current_app.logger.info(f"OData GET: {url}?$filter={filter_query}")
+        except:
+            pass
+
         try:
             response = self.http.get(url, params=encoded_filter, auth=self.auth)
             response.raise_for_status()
 
         except requests.exceptions.RequestException as e:
-            # Don't log here - let the caller (fetcher.py) decide how to handle/log
-            # fetcher.py will log as WARNING and fall back to cache if available
+            # Log the error with the URL for debugging
+            try:
+                from flask import current_app
+                if current_app:
+                    current_app.logger.error(f"OData request failed: {url}?$filter={filter_query} - Error: {e}")
+            except:
+                pass
             raise
 
         # Process and reformat dates
