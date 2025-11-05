@@ -622,20 +622,20 @@ def delete_customer(customer_id):
 def edit_customer(customer_id):
     if request.method == 'POST':
         # Fetch updated form data
-        name = request.form['name']
-        url = request.form['url']
-        title = request.form['title']
+        dd_name = request.form.get('dd_name', '').strip() or None
+        cbr_name = request.form.get('cbr_name', '').strip() or None
+        field_type = request.form.get('field_type', 'Customer Name')
 
         # Update the customer in the database
         query_db(
-            "UPDATE customers SET name = ?, url = ?, title = ? WHERE id = ?",
-            (name, url, title, customer_id),
+            "UPDATE customers SET dd_name = ?, cbr_name = ?, field_type = ? WHERE id = ?",
+            (dd_name, cbr_name, field_type, customer_id),
         )
         return redirect(url_for('admin'))
 
     # Fetch customer details for pre-filling the form
     customer = query_db(
-        "SELECT id, name, url, title FROM customers WHERE id = ?", (customer_id,), one=True
+        "SELECT id, dd_name, cbr_name, obfuscated_id, field_type FROM customers WHERE id = ?", (customer_id,), one=True
     )
     if not customer:
         return "Customer not found", 404
