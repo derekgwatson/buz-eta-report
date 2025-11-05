@@ -320,26 +320,29 @@ def admin():
     if request.method == "POST":
         dd_name = (request.form.get("dd_name") or "").strip()
         cbr_name = (request.form.get("cbr_name") or "").strip()
+        display_name = (request.form.get("display_name") or "").strip()
         field_type = request.form.get("field_type") or "Customer Name"
         if not (dd_name or cbr_name):
             return render_template("400.html", message="Pick at least one customer."), 400
+        if not display_name:
+            return render_template("400.html", message="Display name is required."), 400
         if field_type not in {"Customer Name", "Customer Group"}:
             return render_template("400.html", message="Invalid field type."), 400
         obfuscated_id = uuid.uuid4().hex
 
         query_db(
-            "INSERT INTO customers (dd_name, cbr_name, obfuscated_id, field_type) "
-            "VALUES (?, ?, ?, ?)",
-            (dd_name, cbr_name, obfuscated_id, field_type),
+            "INSERT INTO customers (dd_name, cbr_name, display_name, obfuscated_id, field_type) "
+            "VALUES (?, ?, ?, ?, ?)",
+            (dd_name, cbr_name, display_name, obfuscated_id, field_type),
             logger=app.logger,
         )
         return redirect(url_for("admin"))
 
-    customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id, field_type FROM customers")
+    customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id, field_type, display_name FROM customers")
     try:
-        sorted_customers = sorted(customers, key=lambda c: ((c["dd_name"] or c["cbr_name"] or "").lower()))
+        sorted_customers = sorted(customers, key=lambda c: (c["display_name"] or "").lower())
     except (TypeError, KeyError):
-        sorted_customers = sorted(customers, key=lambda c: ((c[1] or c[2] or "").lower()))
+        sorted_customers = sorted(customers, key=lambda c: (c[5] or "").lower())
 
     return render_template("admin.html", customers=sorted_customers)
 
@@ -624,18 +627,22 @@ def edit_customer(customer_id):
         # Fetch updated form data
         dd_name = request.form.get('dd_name', '').strip() or None
         cbr_name = request.form.get('cbr_name', '').strip() or None
+        display_name = request.form.get('display_name', '').strip()
         field_type = request.form.get('field_type', 'Customer Name')
+
+        if not display_name:
+            return render_template("400.html", message="Display name is required."), 400
 
         # Update the customer in the database
         query_db(
-            "UPDATE customers SET dd_name = ?, cbr_name = ?, field_type = ? WHERE id = ?",
-            (dd_name, cbr_name, field_type, customer_id),
+            "UPDATE customers SET dd_name = ?, cbr_name = ?, display_name = ?, field_type = ? WHERE id = ?",
+            (dd_name, cbr_name, display_name, field_type, customer_id),
         )
         return redirect(url_for('admin'))
 
     # Fetch customer details for pre-filling the form
     customer = query_db(
-        "SELECT id, dd_name, cbr_name, obfuscated_id, field_type FROM customers WHERE id = ?", (customer_id,), one=True
+        "SELECT id, dd_name, cbr_name, obfuscated_id, field_type, display_name FROM customers WHERE id = ?", (customer_id,), one=True
     )
     if not customer:
         return "Customer not found", 404
