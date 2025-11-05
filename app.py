@@ -712,6 +712,23 @@ def initialize_database():
     print("Database ready.")
 
 
+@app.cli.command("clear-cache")
+@click.option("--confirm", is_flag=True, help="Confirm cache deletion")
+def clear_cache_command(confirm):
+    """Clear all cached data from the database."""
+    if not confirm:
+        print("This will delete all cached data.")
+        print("Run with --confirm to proceed: flask clear-cache --confirm")
+        return
+
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM cache")
+    deleted = cursor.rowcount
+    conn.commit()
+    print(f"Cleared {deleted} cache entries.")
+
+
 @app.cli.command("prewarm-cache")
 @click.option("--instance", "instances", multiple=True, default=["DD", "CBR"], help="Instances to warm")
 def prewarm_cache(instances):
