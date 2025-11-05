@@ -125,15 +125,27 @@ def build_eta_report_context(
 
     _prog(progress, "Fetching orders…", 20)
     if field_type == "Customer Group":
-        data_dd_raw = get_open_orders_by_group(db, dd_name, "DD") if dd_name else []
-        data_cbr_raw = get_open_orders_by_group(db, cbr_name, "CBR") if cbr_name else []
+        data_dd_raw = get_open_orders_by_group(db, dd_name, "DD") if dd_name else {"data": [], "source": "live"}
+        data_cbr_raw = get_open_orders_by_group(db, cbr_name, "CBR") if cbr_name else {"data": [], "source": "live"}
     else:
-        data_dd_raw = get_open_orders(db, dd_name, "DD") if dd_name else []
-        data_cbr_raw = get_open_orders(db, cbr_name, "CBR") if cbr_name else []
+        data_dd_raw = get_open_orders(db, dd_name, "DD") if dd_name else {"data": [], "source": "live"}
+        data_cbr_raw = get_open_orders(db, cbr_name, "CBR") if cbr_name else {"data": [], "source": "live"}
 
-    # Normalize to lists
+    # Extract data and source information
     data_dd = _to_list_of_dicts(data_dd_raw)
     data_cbr = _to_list_of_dicts(data_cbr_raw)
+
+    # Track data source (live vs cached)
+    source_dd = data_dd_raw.get("source", "live") if isinstance(data_dd_raw, dict) else "live"
+    source_cbr = data_cbr_raw.get("source", "live") if isinstance(data_cbr_raw, dict) else "live"
+
+    # Overall source: if either is cached, show cached
+    if source_dd == "live" and source_cbr == "live":
+        overall_source = "live"
+    elif source_dd != "live":
+        overall_source = source_dd
+    else:
+        overall_source = source_cbr
 
     # In dev, fail fast with a clear message if not lists
     assert isinstance(data_dd, list) and isinstance(data_cbr, list), \
@@ -157,6 +169,9 @@ def build_eta_report_context(
         "groups": unique_groups,
         "suppliers": unique_suppliers,
         "obfuscated_id": obfuscated_id,
+        "source": overall_source,
+        "last_dd": None,  # TODO: Extract from cache metadata if needed
+        "last_cbr": None,  # TODO: Extract from cache metadata if needed
     }
 
     _prog(progress, "Ready.", 95)

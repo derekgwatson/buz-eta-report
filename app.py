@@ -714,19 +714,26 @@ def initialize_database():
 
 @app.cli.command("clear-cache")
 @click.option("--confirm", is_flag=True, help="Confirm cache deletion")
-def clear_cache_command(confirm):
+@click.option("--jobs", is_flag=True, help="Also clear job history")
+def clear_cache_command(confirm, jobs):
     """Clear all cached data from the database."""
     if not confirm:
-        print("This will delete all cached data.")
-        print("Run with --confirm to proceed: flask clear-cache --confirm")
+        print("This will delete all cached data" + (" and job history" if jobs else "") + ".")
+        print("Run with --confirm to proceed: flask clear-cache --confirm" + (" --jobs" if jobs else ""))
         return
 
     conn = get_db()
     cursor = conn.cursor()
     cursor.execute("DELETE FROM cache")
-    deleted = cursor.rowcount
+    cache_deleted = cursor.rowcount
+
+    jobs_deleted = 0
+    if jobs:
+        cursor.execute("DELETE FROM jobs")
+        jobs_deleted = cursor.rowcount
+
     conn.commit()
-    print(f"Cleared {deleted} cache entries.")
+    print(f"Cleared {cache_deleted} cache entries" + (f" and {jobs_deleted} job records." if jobs else "."))
 
 
 @app.cli.command("prewarm-cache")
