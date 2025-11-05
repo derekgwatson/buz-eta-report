@@ -123,29 +123,36 @@ def build_eta_report_context(
     cbr_name = row["cbr_name"]
     field_type = row["field_type"]
 
+    # Determine if we need to fetch from both sources
+    has_both = bool(dd_name) and bool(cbr_name)
+
+    _prog(progress, "Fetching orders from API…", 10)
+
     # Fetch data from DD (if configured)
+    # NOTE: Will sit at 10% during this long API call
     if dd_name:
-        _prog(progress, "Fetching DD orders…", 15)
         if field_type == "Customer Group":
             data_dd_raw = get_open_orders_by_group(db, dd_name, "DD")
         else:
             data_dd_raw = get_open_orders(db, dd_name, "DD")
-        _prog(progress, "DD orders fetched", 30)
+        # After DD fetch completes, jump to 50% if we have both, or 80% if DD only
+        _prog(progress, "DD data received", 50 if has_both else 80)
     else:
         data_dd_raw = {"data": [], "source": "live"}
 
     # Fetch data from CBR (if configured)
+    # NOTE: Will sit at 50% during this long API call (if both sources)
     if cbr_name:
-        _prog(progress, "Fetching CBR orders…", 35)
         if field_type == "Customer Group":
             data_cbr_raw = get_open_orders_by_group(db, cbr_name, "CBR")
         else:
             data_cbr_raw = get_open_orders(db, cbr_name, "CBR")
-        _prog(progress, "CBR orders fetched", 50)
+        # After CBR fetch completes, jump to 80%
+        _prog(progress, "CBR data received", 80)
     else:
         data_cbr_raw = {"data": [], "source": "live"}
 
-    _prog(progress, "Processing data…", 55)
+    _prog(progress, "Processing data…", 85)
 
     # Extract data and source information
     data_dd = _to_list_of_dicts(data_dd_raw)
@@ -169,10 +176,10 @@ def build_eta_report_context(
 
     combined_data = data_cbr + data_dd
 
-    _prog(progress, "Grouping by RefNo…", 60)
+    _prog(progress, "Grouping data…", 90)
     grouped_data = _combine_and_group(combined_data)
 
-    _prog(progress, "Preparing filters…", 75)
+    _prog(progress, "Finalizing…", 95)
     customer_name = _make_customer_name(dd_name or "", cbr_name or "")
     unique_statuses = _normalize_and_sort([i.get("ProductionStatus", "N/A") for i in combined_data])
     unique_groups = _normalize_and_sort([i.get("ProductionLine", "N/A") for i in combined_data])
