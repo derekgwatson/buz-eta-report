@@ -338,13 +338,13 @@ def admin():
         )
         return redirect(url_for("admin"))
 
-    customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id, field_type, display_name FROM customers")
-    try:
-        sorted_customers = sorted(customers, key=lambda c: (c["display_name"] or "").lower())
-    except (TypeError, KeyError):
-        sorted_customers = sorted(customers, key=lambda c: (c[5] or "").lower())
+    customers = query_db(
+        "SELECT id, dd_name, cbr_name, obfuscated_id, field_type, display_name "
+        "FROM customers "
+        "ORDER BY LOWER(display_name) ASC"
+    )
 
-    return render_template("admin.html", customers=sorted_customers)
+    return render_template("admin.html", customers=customers)
 
 
 # ---------- ETA async render flow ----------
