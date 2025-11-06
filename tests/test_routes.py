@@ -1,36 +1,9 @@
 import json
 import time
-from types import SimpleNamespace
 import pytest
 from flask import Response
 
-@pytest.fixture(autouse=True)
-def _env(monkeypatch, tmp_path):
-    # Minimal env
-    monkeypatch.setenv("DATABASE", str(tmp_path / "test.db"))
-    monkeypatch.setenv("FLASK_SECRET", "test-secret")
-    monkeypatch.setenv("APP_ENV", "development")
-    monkeypatch.setenv("GOOGLE_CLIENT_ID", "x")
-    monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "y")
-    # Prevent real Sentry init/network during import
-    monkeypatch.setattr("sentry_sdk.init", lambda *a, **k: None, raising=True)
-
-@pytest.fixture
-def app():
-    from app import app as flask_app
-    flask_app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)  # <-- disable CSRF in tests
-    return flask_app
-
-@pytest.fixture
-def client(app):
-    return app.test_client()
-
-@pytest.fixture
-def logged_in_admin(monkeypatch):
-    fake = SimpleNamespace(is_authenticated=True, role="admin", id=1, name="Test Admin", email="t@example.com")
-    monkeypatch.setattr("flask_login.utils._get_user", lambda: fake, raising=True)
-    return fake
-
+# Fixtures are defined in conftest.py and imported automatically
 
 # ---------- Basic pages / auth ----------
 
@@ -161,12 +134,12 @@ def test_work_in_progress_success(client, monkeypatch, logged_in_admin):
 # ---------- Admin page (GET/POST) ----------
 
 def test_admin_get_ok(client, monkeypatch, logged_in_admin):
-    # Returning rows as tuples or dicts; your code tolerates either
+    # Returning rows as tuples; now includes display_name as 6th field
     monkeypatch.setattr(
         "app.query_db",
         lambda *a, **k: [
-            (1, "Acme", "", "abc", "Customer Name"),
-            (2, "", "Bravo", "def", "Customer Group"),
+            (1, "Acme", "", "abc", "Customer Name", "Acme Corp"),
+            (2, "", "Bravo", "def", "Customer Group", "Bravo Industries"),
         ],
         raising=True,
     )
@@ -178,9 +151,14 @@ def test_admin_get_ok(client, monkeypatch, logged_in_admin):
 def test_admin_post_validation_error(client, monkeypatch, logged_in_admin):
     # No dd_name/cbr_name provided -> 400
     monkeypatch.setattr("app.query_db", lambda *a, **k: [], raising=True)
-    r = client.post("/admin", data={"dd_name": "", "cbr_name": "", "field_type": "Customer Name"})
+    r = client.post("/admin", data={"dd_name": "", "cbr_name": "", "display_name": "Test", "field_type": "Customer Name"})
     assert r.status_code == 400
     assert b"Pick at least one customer" in r.data
+
+    # No display_name provided -> 400
+    r = client.post("/admin", data={"dd_name": "Acme", "cbr_name": "", "display_name": "", "field_type": "Customer Name"})
+    assert r.status_code == 400
+    assert b"Display name is required" in r.data
 
 
 def test_admin_post_success_redirect(client, monkeypatch, logged_in_admin):
@@ -194,9 +172,10 @@ def test_admin_post_success_redirect(client, monkeypatch, logged_in_admin):
 
     monkeypatch.setattr("app.query_db", _query_db, raising=True)
 
-    r = client.post("/admin", data={"dd_name": "Acme", "cbr_name": "", "field_type": "Customer Group"}, follow_redirects=False)
+    r = client.post("/admin", data={"dd_name": "Acme", "cbr_name": "", "display_name": "Acme Corp", "field_type": "Customer Group"}, follow_redirects=False)
     assert r.status_code == 302  # redirected back to /admin
     assert inserted["row"][0] == "Acme"  # dd_name stored
+    assert inserted["row"][2] == "Acme Corp"  # display_name stored
 
 
 # ---------- Status mapping pages ----------

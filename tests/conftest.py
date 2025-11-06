@@ -16,13 +16,19 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("APP_ENV", "development")
     monkeypatch.setenv("GOOGLE_CLIENT_ID", "x")
     monkeypatch.setenv("GOOGLE_CLIENT_SECRET", "y")
+    # OData credentials for tests
+    monkeypatch.setenv("BUZ_DD_USERNAME", "test-dd-user")
+    monkeypatch.setenv("BUZ_DD_PASSWORD", "test-dd-pass")
+    monkeypatch.setenv("BUZ_CBR_USERNAME", "test-cbr-user")
+    monkeypatch.setenv("BUZ_CBR_PASSWORD", "test-cbr-pass")
     # silence Sentry during tests
     monkeypatch.setattr("sentry_sdk.init", lambda *a, **k: None, raising=True)
 
 
 @pytest.fixture
-def app():
+def app(_env):
     # import AFTER env + Sentry patch
+    # _env fixture dependency ensures environment is set up first
     import app as app_module
     import logging
     app_module.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
