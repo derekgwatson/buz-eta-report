@@ -75,7 +75,7 @@ The job tracking includes:
 - Progress percentage
 - Log messages
 - Error handling with Sentry integration
-- Stall detection (STALL_TTL = 30 seconds)
+- Stall detection (STALL_TTL = 300 seconds / 5 minutes - only for truly hung workers)
 
 ### Cache Strategy (services/cache.py & services/fetcher.py)
 The application uses a SQLite-backed cache to handle:
