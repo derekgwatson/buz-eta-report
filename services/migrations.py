@@ -185,12 +185,20 @@ def _migration_5_add_display_name(conn) -> None:
 
 def _migration_6_fix_display_name_priority(conn) -> None:
     """Fix display_name to prioritize cbr_name over dd_name, and ensure all rows have display_name."""
-    # Update all rows where display_name is NULL, empty, or should be recalculated
-    # Priority: cbr_name first, then dd_name, then empty string
+    # Update ALL rows to ensure correct priority: cbr_name first, then dd_name
+    # This fixes any rows that were populated by v5 with the wrong priority
     conn.execute("""
         UPDATE customers
-           SET display_name = COALESCE(cbr_name, dd_name, '')
-         WHERE display_name IS NULL OR TRIM(display_name) = '';
+           SET display_name = COALESCE(cbr_name, dd_name, '');
+    """)
+
+
+def _migration_7_force_display_name_update(conn) -> None:
+    """Force update of all display_name values to use correct priority (cbr_name > dd_name)."""
+    # This is v7 to ensure it runs even if v6 already executed with the old WHERE clause
+    conn.execute("""
+        UPDATE customers
+           SET display_name = COALESCE(cbr_name, dd_name, '');
     """)
 
 
@@ -201,6 +209,7 @@ MIGRATIONS: List[Tuple[int, Callable]] = [
     (4, _migration_4_customer_to_customer_name),
     (5, _migration_5_add_display_name),
     (6, _migration_6_fix_display_name_priority),
+    (7, _migration_7_force_display_name_update),
 ]
 
 CURRENT_SCHEMA_VERSION = max(v for v, _ in MIGRATIONS)
