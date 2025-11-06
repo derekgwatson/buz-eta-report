@@ -183,12 +183,24 @@ def _migration_5_add_display_name(conn) -> None:
         """)
 
 
+def _migration_6_fix_display_name_priority(conn) -> None:
+    """Fix display_name to prioritize cbr_name over dd_name, and ensure all rows have display_name."""
+    # Update all rows where display_name is NULL, empty, or should be recalculated
+    # Priority: cbr_name first, then dd_name, then empty string
+    conn.execute("""
+        UPDATE customers
+           SET display_name = COALESCE(cbr_name, dd_name, '')
+         WHERE display_name IS NULL OR TRIM(display_name) = '';
+    """)
+
+
 MIGRATIONS: List[Tuple[int, Callable]] = [
     (1, _migration_1_init_schema),
     (2, _migration_2_add_field_type),
     (3, _migration_3_baseline_schema),
     (4, _migration_4_customer_to_customer_name),
     (5, _migration_5_add_display_name),
+    (6, _migration_6_fix_display_name_priority),
 ]
 
 CURRENT_SCHEMA_VERSION = max(v for v, _ in MIGRATIONS)

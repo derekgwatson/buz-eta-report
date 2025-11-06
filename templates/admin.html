@@ -6,8 +6,8 @@
 <h2>Add New Customer</h2>
 <form method="post" id="customerForm">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-    <label for="display_name">Display Name:</label>
-    <input type="text" id="display_name" name="display_name" required>
+    <label for="display_name">Display Name (optional - defaults to CBR or DD name):</label>
+    <input type="text" id="display_name" name="display_name">
 
     <label for="dd_name">DD Name:</label>
     <input type="text" id="dd_name" name="dd_name">
