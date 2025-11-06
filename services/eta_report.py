@@ -26,7 +26,7 @@ def _fetch_customer_row(obfuscated_id: str, db=None):
     if db is None:
         db = get_db()
     cur = db.execute(
-        "SELECT dd_name, cbr_name, field_type FROM customers WHERE obfuscated_id = ?",
+        "SELECT dd_name, cbr_name, field_type, display_name FROM customers WHERE obfuscated_id = ?",
         (obfuscated_id,),
     )
     return cur.fetchone()
@@ -122,6 +122,7 @@ def build_eta_report_context(
     dd_name = row["dd_name"]
     cbr_name = row["cbr_name"]
     field_type = row["field_type"]
+    display_name = row["display_name"]
 
     # Determine if we need to fetch from both sources
     has_both = bool(dd_name) and bool(cbr_name)
@@ -180,7 +181,8 @@ def build_eta_report_context(
     grouped_data = _combine_and_group(combined_data)
 
     _prog(progress, "Finalizing…", 95)
-    customer_name = _make_customer_name(dd_name or "", cbr_name or "")
+    # Use display_name from database; fall back to old logic if somehow missing
+    customer_name = display_name or _make_customer_name(dd_name or "", cbr_name or "")
     unique_statuses = _normalize_and_sort([i.get("ProductionStatus", "N/A") for i in combined_data])
     unique_groups = _normalize_and_sort([i.get("ProductionLine", "N/A") for i in combined_data])
     unique_suppliers = _normalize_and_sort([i.get("Instance", "N/A").upper() for i in combined_data], case="upper")

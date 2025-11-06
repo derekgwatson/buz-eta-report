@@ -117,14 +117,14 @@ def fetch_report_rows_and_name(
 ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[str]]:
     """Pure function wrapper around your existing data access."""
     customer = query_db(
-        "SELECT dd_name, cbr_name, field_type FROM customers WHERE obfuscated_id = ?",
+        "SELECT dd_name, cbr_name, field_type, display_name FROM customers WHERE obfuscated_id = ?",
         (obfuscated_id,),
         one=True
     )
     if not customer:
         return None, None
 
-    dd_name, cbr_name, field_type = customer
+    dd_name, cbr_name, field_type, display_name = customer
     if field_type == "Customer Group":
         data_dd  = get_open_orders_by_group(get_db(), dd_name, "DD") if dd_name else []
         data_cbr = get_open_orders_by_group(get_db(), cbr_name, "CBR") if cbr_name else []
@@ -134,7 +134,10 @@ def fetch_report_rows_and_name(
 
     combined = (data_dd or []) + (data_cbr or [])
 
-    if (dd_name == cbr_name) or (not cbr_name):
+    # Use display_name from database; fall back to old logic if somehow missing
+    if display_name:
+        customer_name = display_name
+    elif (dd_name == cbr_name) or (not cbr_name):
         customer_name = dd_name or cbr_name or ""
     elif not dd_name:
         customer_name = cbr_name
