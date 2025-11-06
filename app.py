@@ -65,7 +65,7 @@ import click, sqlite3
 from services.migrations import _backup_sqlite
 
 
-STALL_TTL = 30  # seconds without updates
+STALL_TTL = 300  # 5 minutes - only for detecting truly hung workers
 
 
 # ---------- env ----------
@@ -432,7 +432,11 @@ def job_status(job_id):
         return jsonify({"error": "not found"}), 404
 
     if job["status"] == "running" and time.time() - job["updated_ts"] > STALL_TTL:
-        update_job(job_id, error="Worker stalled", done=True)
+        update_job(
+            job_id,
+            error="Report generation has stopped responding. This usually means the supplier's system is experiencing significant delays. Please try generating the report again, or contact support if this issue persists.",
+            done=True
+        )
         job = get_job(job_id)  # reload
 
     return jsonify(job)
