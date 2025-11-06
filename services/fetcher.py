@@ -114,7 +114,7 @@ def fetch_or_cached(
     except (ConnectionError,) as exc:
         if fallback_on_conn_errors and entry:
             _log("warning", f"[fallback] Connection error for {cache_key}; serving cache")
-            return entry.payload, "cache-error"
+            return entry.payload, "cache-connection"
         raise RuntimeError(
             "We're having trouble connecting to our supplier data system. "
             "Please check your internet connection and try again in a few minutes."

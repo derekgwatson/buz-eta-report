@@ -512,7 +512,7 @@ def test_fetch_or_cached_fallback_on_connection_error(temp_db, monkeypatch):
     )
 
     assert result == {"cached": "after_conn_error"}
-    assert source == "cache-error"
+    assert source == "cache-connection"
 
 
 # ---------------------------

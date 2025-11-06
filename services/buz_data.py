@@ -21,7 +21,7 @@ def get_statuses(instance: str) -> dict:
     """
     Returns a dict with:
       - data: list[str] of statuses
-      - source: 'live' | 'cache' | 'cache-503' | 'cache-timeout' | 'cache-error'
+      - source: 'live' | 'cache' | 'cache-503' | 'cache-timeout' | 'cache-connection'
     """
     odata_client = ODataClient(instance)
 
