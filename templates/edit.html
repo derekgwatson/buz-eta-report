@@ -7,6 +7,9 @@
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <h2>Edit Customer</h2>
 
+    <label for="display_name">Display Name:</label>
+    <input type="text" id="display_name" name="display_name" value="{{ customer[5] }}" required>
+
     <label for="dd_name">DD Name:</label>
     <input type="text" id="dd_name" name="dd_name" value="{{ customer[1] }}">
 

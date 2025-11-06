@@ -168,11 +168,27 @@ def _migration_4_customer_to_customer_name(conn) -> None:
     conn.execute("PRAGMA foreign_keys = ON;")
 
 
+def _migration_5_add_display_name(conn) -> None:
+    """Add display_name column to customers table."""
+    if not _column_exists(conn, "customers", "display_name"):
+        conn.execute("""
+            ALTER TABLE customers
+            ADD COLUMN display_name TEXT;
+        """)
+        # Backfill with computed name (dd_name or cbr_name)
+        conn.execute("""
+            UPDATE customers
+               SET display_name = COALESCE(dd_name, cbr_name, '')
+             WHERE display_name IS NULL OR display_name = '';
+        """)
+
+
 MIGRATIONS: List[Tuple[int, Callable]] = [
     (1, _migration_1_init_schema),
     (2, _migration_2_add_field_type),
     (3, _migration_3_baseline_schema),
     (4, _migration_4_customer_to_customer_name),
+    (5, _migration_5_add_display_name),
 ]
 
 CURRENT_SCHEMA_VERSION = max(v for v, _ in MIGRATIONS)

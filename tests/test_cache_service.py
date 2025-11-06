@@ -360,7 +360,7 @@ def test_fetch_or_cached_raises_on_503_without_cache(temp_db, monkeypatch):
         resp.status_code = 503
         raise requests.HTTPError(response=resp)
 
-    with pytest.raises(RuntimeError, match="API returned 503 and no cached data"):
+    with pytest.raises(RuntimeError, match="unable to generate your report"):
         fetch_or_cached(
             cache_key="no_cache_503",
             fetch_fn=fetch_fn,
@@ -469,14 +469,14 @@ def test_fetch_or_cached_fallback_on_timeout(temp_db, monkeypatch):
 
 
 def test_fetch_or_cached_raises_on_timeout_without_fallback(temp_db, monkeypatch):
-    """When fallback_on_timeouts=False, raises Timeout."""
+    """When fallback_on_timeouts=False, raises RuntimeError with user-friendly message."""
     monkeypatch.setattr("services.fetcher.ensure_cache_table", lambda: None)
     monkeypatch.setattr("services.fetcher.get_cache", lambda k: None)
 
     def fetch_fn():
         raise requests.Timeout("Connection timed out")
 
-    with pytest.raises(requests.Timeout):
+    with pytest.raises(RuntimeError, match="taking longer than expected"):
         fetch_or_cached(
             cache_key="no_fallback_timeout",
             fetch_fn=fetch_fn,
