@@ -65,7 +65,7 @@ import click, sqlite3
 from services.migrations import _backup_sqlite
 
 
-STALL_TTL = 30  # seconds without updates
+STALL_TTL = 300  # 5 minutes - only for detecting truly hung workers
 
 
 # ---------- env ----------
@@ -324,8 +324,9 @@ def admin():
         field_type = request.form.get("field_type") or "Customer Name"
         if not (dd_name or cbr_name):
             return render_template("400.html", message="Pick at least one customer."), 400
+        # Auto-populate display_name if not provided: cbr_name first, then dd_name
         if not display_name:
-            return render_template("400.html", message="Display name is required."), 400
+            display_name = cbr_name or dd_name
         if field_type not in {"Customer Name", "Customer Group"}:
             return render_template("400.html", message="Invalid field type."), 400
         obfuscated_id = uuid.uuid4().hex
@@ -338,13 +339,13 @@ def admin():
         )
         return redirect(url_for("admin"))
 
-    customers = query_db("SELECT id, dd_name, cbr_name, obfuscated_id, field_type, display_name FROM customers")
-    try:
-        sorted_customers = sorted(customers, key=lambda c: (c["display_name"] or "").lower())
-    except (TypeError, KeyError):
-        sorted_customers = sorted(customers, key=lambda c: (c[5] or "").lower())
+    customers = query_db(
+        "SELECT id, dd_name, cbr_name, obfuscated_id, field_type, display_name "
+        "FROM customers "
+        "ORDER BY LOWER(display_name) ASC"
+    )
 
-    return render_template("admin.html", customers=sorted_customers)
+    return render_template("admin.html", customers=customers)
 
 
 # ---------- ETA async render flow ----------
@@ -432,7 +433,11 @@ def job_status(job_id):
         return jsonify({"error": "not found"}), 404
 
     if job["status"] == "running" and time.time() - job["updated_ts"] > STALL_TTL:
-        update_job(job_id, error="Worker stalled", done=True)
+        update_job(
+            job_id,
+            error="Report generation has stopped responding. This usually means the supplier's system is experiencing significant delays. Please try generating the report again, or contact support if this issue persists.",
+            done=True
+        )
         job = get_job(job_id)  # reload
 
     return jsonify(job)
@@ -630,8 +635,9 @@ def edit_customer(customer_id):
         display_name = request.form.get('display_name', '').strip()
         field_type = request.form.get('field_type', 'Customer Name')
 
+        # Auto-populate display_name if not provided: cbr_name first, then dd_name
         if not display_name:
-            return render_template("400.html", message="Display name is required."), 400
+            display_name = (cbr_name or dd_name or "").strip()
 
         # Update the customer in the database
         query_db(
