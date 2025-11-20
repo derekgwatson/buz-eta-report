@@ -89,7 +89,12 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
                 return False
 
             # Check if ALL non-null statuses are 'Cancelled' or 'Invoiced' (case-insensitive)
-            finished_statuses = {'cancelled', 'invoiced'}
+            finished_statuses = {
+                'cancelled',
+                'invoiced',
+                'invoice ex gst fees - actioned in xero',
+                'invoice ex gst fees - not in xero'
+            }
             all_finished = all(str(s).strip().lower() in finished_statuses for s in statuses)
 
             return all_finished
