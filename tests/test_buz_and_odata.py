@@ -261,6 +261,64 @@ def test_fetch_and_process_orders_filters_fully_cancelled(monkeypatch):
     assert out == []  # Order should be filtered out
 
 
+def test_fetch_and_process_orders_filters_invoice_ex_gst_actioned(monkeypatch):
+    """Orders where ALL non-null ProductionStatus values are 'Invoice Ex GST Fees - Actioned in Xero' should be excluded"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD007",
+                    "Descn": "Invoice Ex GST Actioned Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Invoice Ex GST Fees - Actioned in Xero",
+                    "FixedLine": 1,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert out == []  # Order should be filtered out
+
+
+def test_fetch_and_process_orders_filters_invoice_ex_gst_not_in_xero(monkeypatch):
+    """Orders where ALL non-null ProductionStatus values are 'Invoice Ex Gst Fees - Not In Xero' should be excluded"""
+    monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
+
+    class _StubClient:
+        def get(self, endpoint, filters):
+            return [
+                {
+                    "RefNo": "ORD008",
+                    "Descn": "Invoice Ex GST Not In Xero Order",
+                    "DateScheduled": "2024-12-01",
+                    "ProductionLine": "Line 1",
+                    "InventoryItem": "Item 1",
+                    "ProductionStatus": "Invoice Ex Gst Fees - Not In Xero",
+                    "FixedLine": 1,
+                },
+            ]
+
+    class _Conn:
+        def cursor(self):
+            class _Cur:
+                def execute(self, *_a, **_k): pass
+                def fetchall(self): return []
+            return _Cur()
+
+    out = fetch_and_process_orders(_Conn(), _StubClient(), ["OrderStatus eq 'Work in Progress'"])
+    assert out == []  # Order should be filtered out
+
+
 def test_fetch_and_process_orders_keeps_mixed_status(monkeypatch):
     """Orders with some lines in progress should be kept"""
     monkeypatch.setenv('ENABLE_CANCELLED_INVOICED_FILTER', 'true')
