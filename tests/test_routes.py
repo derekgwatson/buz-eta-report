@@ -156,10 +156,10 @@ def test_admin_post_validation_error(client, monkeypatch, logged_in_admin):
     assert r.status_code == 400
     assert b"Pick at least one customer" in r.data
 
-    # No display_name provided -> 400
-    r = client.post("/admin", data={"dd_name": "Acme", "cbr_name": "", "display_name": "", "field_type": "Customer Name"})
+    # Invalid field_type -> 400
+    r = client.post("/admin", data={"dd_name": "Acme", "cbr_name": "", "display_name": "Acme", "field_type": "Invalid Type"})
     assert r.status_code == 400
-    assert b"Display name is required" in r.data
+    assert b"Invalid field type" in r.data
 
 
 def test_admin_post_success_redirect(client, monkeypatch, logged_in_admin):

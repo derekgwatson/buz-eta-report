@@ -217,8 +217,8 @@ def test_fetch_report_rows_and_name_individual_customer_uses_get_open_orders(stu
     get_db, get_open_orders, get_open_orders_by_group = stubs
 
     def query_db(sql: str, params: Tuple[Any, ...], one: bool = False):
-        # dd_name, cbr_name, field_type
-        return ("ACME DD", "ACME CBR", "Customer")
+        # dd_name, cbr_name, field_type, display_name
+        return ("ACME DD", "ACME CBR", "Customer", None)
 
     rows, name = export.fetch_report_rows_and_name(
         "obf123",
@@ -238,7 +238,7 @@ def test_fetch_report_rows_and_name_group_customer_uses_group_accessor(stubs):
     get_db, get_open_orders, get_open_orders_by_group = stubs
 
     def query_db(sql: str, params: Tuple[Any, ...], one: bool = False):
-        return ("Grp DD", "Grp CBR", "Customer Group")
+        return ("Grp DD", "Grp CBR", "Customer Group", None)
 
     rows, name = export.fetch_report_rows_and_name(
         "obf456",
@@ -258,7 +258,7 @@ def test_fetch_report_rows_and_name_handles_same_dd_cbr_name(stubs):
     get_db, get_open_orders, get_open_orders_by_group = stubs
 
     def query_db(sql: str, params: Tuple[Any, ...], one: bool = False):
-        return ("SameName", "SameName", "Customer")
+        return ("SameName", "SameName", "Customer", None)
 
     rows, name = export.fetch_report_rows_and_name(
         "obf789",
@@ -277,7 +277,7 @@ def test_fetch_report_rows_and_name_handles_missing_one_side(stubs):
 
     def query_db(sql: str, params: Tuple[Any, ...], one: bool = False):
         # No CBR side
-        return ("OnlyDD", "", "Customer")
+        return ("OnlyDD", "", "Customer", None)
 
     rows, name = export.fetch_report_rows_and_name(
         "obf999",
