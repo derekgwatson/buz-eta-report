@@ -401,6 +401,7 @@ def _run_eta_report_job(job_id: str, obfuscated_id: str) -> None:
 
 
 @app.route("/<obfuscated_id>")
+@app.route("/etas/<obfuscated_id>")
 def eta_report(obfuscated_id: str):
     _ = get_db()  # ensure g.db bound
     job_id = str(uuid.uuid4())
@@ -553,6 +554,7 @@ def _customer_data_only(conn, customer, instance):
 
 
 @app.route("/<obfuscated_id>/download.<fmt>", methods=["GET"])
+@app.route("/etas/<obfuscated_id>/download.<fmt>", methods=["GET"])
 def download_orders(obfuscated_id: str, fmt: str):
     rows, customer_name = fetch_report_rows_and_name(
         obfuscated_id,
