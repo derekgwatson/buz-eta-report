@@ -260,9 +260,9 @@ def test_manage_users_ok(client, monkeypatch, logged_in_admin):
 
 
 def test_add_user_success(client, monkeypatch, logged_in_admin):
-    # POST minimal user and expect redirect
+    # POST minimal user and expect redirect (using "manager" role instead of old "user")
     monkeypatch.setattr("app.execute_query", lambda *a, **k: None, raising=True)
-    r = client.post("/add_user", data={"email": "x@y.com", "name": "X", "role": "user"}, follow_redirects=False)
+    r = client.post("/add_user", data={"email": "x@y.com", "name": "X", "role": "manager"}, follow_redirects=False)
     assert r.status_code == 302
 
 
@@ -283,3 +283,118 @@ def test_favicon_and_robots(client, monkeypatch):
     monkeypatch.setattr("app.send_from_directory", lambda *a, **k: Response(b"ok", mimetype="text/plain"), raising=True)
     assert client.get("/favicon.ico").status_code == 200
     assert client.get("/robots.txt").status_code == 200
+
+
+# ---------- Viewer role access tests ----------
+
+def test_viewer_can_access_admin_page(client, monkeypatch, logged_in_viewer):
+    """Viewer can see the customer list at /admin (GET)"""
+    monkeypatch.setattr(
+        "app.query_db",
+        lambda *a, **k: [
+            (1, "Acme", "", "abc", "Customer Name", "Acme Corp"),
+        ],
+        raising=True,
+    )
+    r = client.get("/admin")
+    assert r.status_code == 200
+    assert b"Acme" in r.data
+
+
+def test_viewer_cannot_add_customer(client, monkeypatch, logged_in_viewer):
+    """Viewer cannot add customers (POST to /admin)"""
+    monkeypatch.setattr("app.query_db", lambda *a, **k: [], raising=True)
+    r = client.post("/admin", data={"dd_name": "NewCust", "cbr_name": "", "display_name": "New", "field_type": "Customer Name"})
+    assert r.status_code == 403
+
+
+def test_viewer_cannot_edit_customer(client, monkeypatch, logged_in_viewer):
+    """Viewer cannot edit customers"""
+    r = client.get("/edit/1")
+    assert r.status_code == 403
+
+
+def test_viewer_cannot_delete_customer(client, monkeypatch, logged_in_viewer):
+    """Viewer cannot delete customers"""
+    monkeypatch.setattr("app.query_db", lambda *a, **k: None, raising=True)
+    r = client.get("/delete/1")
+    assert r.status_code == 403
+
+
+def test_viewer_can_access_status_mappings(client, monkeypatch, logged_in_viewer):
+    """Viewer can view status mappings"""
+    monkeypatch.setattr(
+        "app.get_status_mappings",
+        lambda conn: [(1, "In Progress", "Active", 1)],
+        raising=True,
+    )
+    monkeypatch.setattr("app.get_db", lambda: None, raising=True)
+    r = client.get("/status_mapping")
+    assert r.status_code == 200
+    assert b"Active" in r.data
+
+
+def test_viewer_cannot_edit_status_mapping(client, monkeypatch, logged_in_viewer):
+    """Viewer cannot edit status mappings"""
+    monkeypatch.setattr("app.get_db", lambda: None, raising=True)
+    r = client.get("/status_mapping/edit/1")
+    assert r.status_code == 403
+
+
+# ---------- Manager role access tests ----------
+
+def test_manager_can_add_customer(client, monkeypatch, logged_in_manager):
+    """Manager can add customers"""
+    inserted = {}
+
+    def _query_db(sql, params=(), one=False, logger=None):
+        if sql.strip().upper().startswith("INSERT INTO CUSTOMERS"):
+            inserted["row"] = params
+        return []
+
+    monkeypatch.setattr("app.query_db", _query_db, raising=True)
+    r = client.post("/admin", data={"dd_name": "Acme", "cbr_name": "", "display_name": "Acme", "field_type": "Customer Name"}, follow_redirects=False)
+    assert r.status_code == 302
+    assert inserted["row"][0] == "Acme"
+
+
+def test_manager_can_edit_customer(client, monkeypatch, logged_in_manager):
+    """Manager can edit customers"""
+    monkeypatch.setattr(
+        "app.query_db",
+        lambda *a, **k: (1, "Acme", "", "abc", "Customer Name", "Acme Corp"),
+        raising=True,
+    )
+    r = client.get("/edit/1")
+    assert r.status_code == 200
+
+
+def test_manager_can_delete_customer(client, monkeypatch, logged_in_manager):
+    """Manager can delete customers"""
+    monkeypatch.setattr("app.query_db", lambda *a, **k: None, raising=True)
+    r = client.get("/delete/1", follow_redirects=False)
+    assert r.status_code == 302  # redirects to /admin
+
+
+def test_manager_can_edit_status_mapping(client, monkeypatch, logged_in_manager):
+    """Manager can edit status mappings"""
+    monkeypatch.setattr("app.get_db", lambda: None, raising=True)
+    monkeypatch.setattr("app.get_status_mapping", lambda mapping_id, conn: (1, "In Progress", "Active", 1), raising=True)
+    r = client.get("/status_mapping/edit/1")
+    assert r.status_code == 200
+
+
+# ---------- Edit/delete routes require authentication ----------
+
+def test_edit_customer_requires_auth(client):
+    """Edit customer requires authentication"""
+    r = client.get("/edit/1")
+    # Flask-Login should redirect to login
+    assert r.status_code in (302, 401)
+
+
+def test_delete_customer_requires_auth(client):
+    """Delete customer requires authentication"""
+    r = client.get("/delete/1")
+    # Flask-Login should redirect to login
+    assert r.status_code in (302, 401)

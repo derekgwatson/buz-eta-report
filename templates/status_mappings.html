@@ -9,22 +9,27 @@
         <th>Buz Status</th>
         <th>Custom Status</th>
         <th>Active</th>
+        {% if current_user.role in ['admin', 'manager'] %}
         <th>Actions</th>
+        {% endif %}
     </tr>
     {% for mapping_id, odata_status, custom_status, active in mappings %}
     <tr>
         <td>{{ odata_status }}</td>
         <td>{{ custom_status }}</td>
         <td>{{ 'Yes' if active else 'No' }}</td>
+        {% if current_user.role in ['admin', 'manager'] %}
         <td>
             <a href="{{ url_for('edit_status_mapping_route', mapping_id=mapping_id) }}">Edit</a>
         </td>
+        {% endif %}
     </tr>
     {% endfor %}
 </table>
 
+{% if current_user.role == 'admin' %}
 <HR>
-<!-- Buttons Section -->
+<!-- Buttons Section (Admin only) -->
 
 <div class="button-container">
     <form id="refreshForm" action="{{ url_for('refresh_statuses') }}" method="post">
@@ -45,4 +50,5 @@ document.getElementById("refreshForm").addEventListener("submit", function () {
     document.getElementById("refreshForm").style.display = "none";
 });
 </script>
+{% endif %}
 {% endblock %}

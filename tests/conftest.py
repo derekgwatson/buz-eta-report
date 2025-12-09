@@ -50,6 +50,24 @@ def logged_in_admin(monkeypatch):
     return fake
 
 
+@pytest.fixture
+def logged_in_manager(monkeypatch):
+    # fake a logged-in manager (was "user" role)
+    from types import SimpleNamespace
+    fake = SimpleNamespace(is_authenticated=True, role="manager", id=2, name="Test Manager", email="manager@example.com")
+    monkeypatch.setattr("flask_login.utils._get_user", lambda: fake, raising=True)
+    return fake
+
+
+@pytest.fixture
+def logged_in_viewer(monkeypatch):
+    # fake a logged-in viewer (Peter-authenticated staff)
+    from types import SimpleNamespace
+    fake = SimpleNamespace(is_authenticated=True, role="viewer", id=-1, name="Test Viewer", email="viewer@watsonblinds.com.au")
+    monkeypatch.setattr("flask_login.utils._get_user", lambda: fake, raising=True)
+    return fake
+
+
 @pytest.fixture(autouse=True, scope="session")
 def _disable_sentry_and_quiet_logs():
     # Prevent Sentry from initializing/sending in tests

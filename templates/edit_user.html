@@ -21,7 +21,7 @@
         <div class="mb-3">
             <label for="role" class="form-label">Role</label>
                 <select class="form-select" id="role" name="role" required>
-                    <option value="user" {% if user['role'] == 'user' %}selected{% endif %}>User</option>
+                    <option value="manager" {% if user['role'] == 'manager' %}selected{% endif %}>Manager</option>
                     <option value="admin" {% if user['role'] == 'admin' %}selected{% endif %}>Admin</option>
                 </select>
         </div>

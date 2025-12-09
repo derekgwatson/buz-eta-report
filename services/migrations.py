@@ -202,6 +202,29 @@ def _migration_7_force_display_name_update(conn) -> None:
     """)
 
 
+def _migration_8_rename_user_role_to_manager(conn) -> None:
+    """
+    Rename 'user' role to 'manager' in users table.
+
+    This is part of the role system update:
+    - admin: Full access including user management
+    - manager: Can add/edit/delete customers and status mappings
+    - viewer: Read-only access (authenticated via Peter API, not stored in DB)
+    """
+    # Check if users table exists (it's created by create_db_tables, not migrations)
+    table_exists = conn.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' AND name='users'"
+    ).fetchone()
+
+    if table_exists:
+        # Rename 'user' role to 'manager'
+        conn.execute("""
+            UPDATE users
+               SET role = 'manager'
+             WHERE role = 'user';
+        """)
+
+
 MIGRATIONS: List[Tuple[int, Callable]] = [
     (1, _migration_1_init_schema),
     (2, _migration_2_add_field_type),
@@ -210,6 +233,7 @@ MIGRATIONS: List[Tuple[int, Callable]] = [
     (5, _migration_5_add_display_name),
     (6, _migration_6_fix_display_name_priority),
     (7, _migration_7_force_display_name_update),
+    (8, _migration_8_rename_user_role_to_manager),
 ]
 
 CURRENT_SCHEMA_VERSION = max(v for v, _ in MIGRATIONS)

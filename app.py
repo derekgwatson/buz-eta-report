@@ -61,6 +61,7 @@ from services.export import (
     fetch_report_rows_and_name,
     safe_base_filename,
 )
+from services.peter_api import check_staff_with_fallback
 import click, sqlite3
 from services.migrations import _backup_sqlite
 
@@ -270,21 +271,44 @@ def callback():
 
     user_info = oauth.google.get("userinfo").json()
     email = user_info.get("email")
+    google_name = user_info.get("name", "")
     if not email:
         return redirect(url_for("login"))
 
+    # First, check if user exists in our database (admin/manager)
     row = query_db(
         "SELECT id, email, name, role, active FROM users WHERE email = ?",
         (email,),
         one=True,
         logger=app.logger,
     )
-    if not row or not row[4]:
-        return render_template("403.html"), 403
 
-    user = User(id_=row[0], name=row[2], email=row[1], role=row[3])
-    login_user(user)
-    return redirect(url_for("admin"))
+    if row:
+        # User exists in DB
+        if not row[4]:  # not active
+            return render_template("403.html"), 403
+        user = User(id_=row[0], name=row[2], email=row[1], role=row[3])
+        login_user(user)
+        return redirect(url_for("admin"))
+
+    # User not in DB - check if they're Watson staff via Peter API
+    staff_result = check_staff_with_fallback(email, fail_open=False)
+
+    if staff_result["approved"]:
+        # Staff member verified - grant viewer access
+        # Use a negative ID to indicate this is a Peter-authenticated user (not in DB)
+        # The name comes from Peter or falls back to Google name
+        user = User(
+            id_=-1,  # Virtual ID for Peter-authenticated users
+            name=staff_result.get("name") or google_name or email,
+            email=email,
+            role="viewer",
+        )
+        login_user(user)
+        return redirect(url_for("admin"))
+
+    # Not in DB and not verified as staff
+    return render_template("403.html"), 403
 
 
 @app.route("/logout")
@@ -302,7 +326,7 @@ def home():
 
 @app.route("/admin", methods=["GET", "POST"])
 @login_required
-@role_required("admin", "user")
+@role_required("admin", "manager", "viewer")
 def admin():
     def _debug_db_snapshot():
         conn = get_db()
@@ -318,6 +342,10 @@ def admin():
     app.logger.debug(_debug_db_snapshot())
 
     if request.method == "POST":
+        # Only admin and manager can add customers
+        if current_user.role not in ("admin", "manager"):
+            abort(403)
+
         dd_name = (request.form.get("dd_name") or "").strip()
         cbr_name = (request.form.get("cbr_name") or "").strip()
         display_name = (request.form.get("display_name") or "").strip()
@@ -503,7 +531,7 @@ def work_in_progress(instance: str, order_no: str):
 # ---------- Status mapping ----------
 @app.route("/status_mapping")
 @login_required
-@role_required("admin", "user")
+@role_required("admin", "manager", "viewer")
 def list_status_mappings():
     mappings = get_status_mappings(conn=get_db())
     return render_template("status_mappings.html", mappings=mappings)
@@ -511,7 +539,7 @@ def list_status_mappings():
 
 @app.route("/status_mapping/edit/<int:mapping_id>", methods=["GET", "POST"])
 @login_required
-@role_required("admin", "user")
+@role_required("admin", "manager")
 def edit_status_mapping_route(mapping_id: int):
     if request.method == "POST":
         custom_status = (request.form.get("custom_status") or "").strip()
@@ -623,12 +651,16 @@ def add_user():
 
 
 @app.route('/delete/<int:customer_id>')
+@login_required
+@role_required("admin", "manager")
 def delete_customer(customer_id):
     query_db("DELETE FROM customers WHERE id = ?", (customer_id,))
     return redirect(url_for('admin'))
 
 
 @app.route('/edit/<int:customer_id>', methods=['GET', 'POST'])
+@login_required
+@role_required("admin", "manager")
 def edit_customer(customer_id):
     if request.method == 'POST':
         # Fetch updated form data
@@ -698,6 +730,27 @@ def toggle_user_status(user_id: int):
 def delete_user(user_id: int):
     query_db("DELETE FROM users WHERE id = ?", (user_id,))
     return redirect(url_for("manage_users"))
+
+
+# ---------- Error handlers ----------
+@app.errorhandler(400)
+def bad_request(e):
+    return render_template("400.html", message=str(e.description) if hasattr(e, 'description') else "Bad request"), 400
+
+
+@app.errorhandler(403)
+def forbidden(e):
+    return render_template("403.html"), 403
+
+
+@app.errorhandler(404)
+def not_found(e):
+    return render_template("404.html", message="Page not found"), 404
+
+
+@app.errorhandler(500)
+def internal_error(e):
+    return render_template("500.html", message=str(e) if app.debug else "Internal server error"), 500
 
 
 # ---------- misc ----------
