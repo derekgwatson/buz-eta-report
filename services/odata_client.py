@@ -105,7 +105,7 @@ class ODataClient:
             from flask import current_app
             if current_app:
                 current_app.logger.info(f"OData GET: {url}?$filter={filter_query}")
-        except:
+        except Exception:
             pass
 
         try:

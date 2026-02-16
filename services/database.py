@@ -105,7 +105,7 @@ def query_db(query, args=(), one=False, logger=None, conn=None):
         if cur is not None:
             try:
                 cur.close()
-            except:
+            except Exception:
                 pass
 
 
@@ -128,5 +128,5 @@ def execute_query(query, args=(), conn=None, logger=None):
         if cur is not None:
             try:
                 cur.close()
-            except:
+            except Exception:
                 pass

@@ -55,8 +55,8 @@ BuzETA is the **ETA Report Generator** - a Flask web app that fetches order data
 12. ~~**`_run_eta_report_job` uses `get_db()` outside request**~~ - **FIXED**: Wrapped in `app.app_context()` so downstream `current_app` calls work in background threads.
 
 #### Code Quality / Warnings
-13. **15 `ResourceWarning: unclosed database` warnings in tests** - Database connections opened in background threads aren't being closed reliably.
-14. **Bare `except:` clauses** (`services/database.py:128`, `services/odata_client.py:108,121`) - Should catch specific exceptions.
+13. **15 `ResourceWarning: unclosed database` warnings in tests** - Partially addressed by adding `app.app_context()` and `db.close()` to background workers (#12). Remaining warnings may need per-test connection management.
+14. ~~**Bare `except:` clauses**~~ - **FIXED**: Changed to `except Exception:` in database.py and odata_client.py.
 
 ### Coverage Gaps
 
@@ -178,12 +178,12 @@ All functional bugs (#8-#12) resolved. Dead code removed, parameter mismatches f
 | 19 | `query_db` detects write vs read by parsing SQL keyword | Fragile; consider separate read/write functions |
 | 20 | Mixed import styles (`import secrets, threading` on one line) | One import per line per PEP 8 |
 | 21 | `_before_send` uses semicolons to join statements | Use separate lines |
-| 22 | Dead code: `fetch_with_stale_if_error` in buz_data.py | Not called anywhere; remove or integrate |
-| 23 | Dead code: `_cache_key` in buz_data.py | Not called anywhere |
-| 24 | Duplicate `update_status_mapping` in `database.py` | Remove from database.py (belongs in update_status_mapping.py) |
+| 22 | ~~Dead code: `fetch_with_stale_if_error` in buz_data.py~~ | **FIXED**: Removed along with `_cache_key`, unused imports, and type aliases |
+| 23 | ~~Dead code: `_cache_key` in buz_data.py~~ | **FIXED**: Removed (see #22) |
+| 24 | ~~Duplicate `update_status_mapping` in `database.py`~~ | **FIXED**: Removed (see security fixes) |
 | 25 | No rate limiting on public report routes | Consider rate limiting `/<obfuscated_id>` |
 | 26 | No pagination on admin lists | Could become slow with many customers/users |
-| 27 | `test_templates.py` is empty | Either add template tests or remove file |
+| 27 | ~~`test_templates.py` is empty~~ | **FIXED**: Removed empty file |
 
 ## Test Coverage Summary
 
@@ -252,8 +252,8 @@ Currently the app has no structured API. Below is a proposed API design for bot-
 - [ ] Increase test coverage on update_status_mapping.py
 - [ ] Extract app.py routes into Blueprints
 - [ ] Add API interface (Blueprint with JSON endpoints + API key auth)
-- [ ] Clean up dead code (fetch_with_stale_if_error, _cache_key, duplicate update_status_mapping)
-- [ ] Fix bare except clauses
+- [x] Clean up dead code (fetch_with_stale_if_error, _cache_key, duplicate update_status_mapping)
+- [x] Fix bare except clauses
 - [ ] Add rate limiting on public routes
 
 ### Low Priority / Future
