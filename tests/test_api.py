@@ -8,7 +8,7 @@ HEADERS = {"X-API-Key": API_KEY, "Content-Type": "application/json"}
 
 @pytest.fixture(autouse=True)
 def _set_api_key(monkeypatch):
-    monkeypatch.setenv("BUZ_API_KEY", API_KEY)
+    monkeypatch.setenv("API_KEY", API_KEY)
 
 
 # ---------- Auth ----------

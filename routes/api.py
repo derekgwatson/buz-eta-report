@@ -15,7 +15,7 @@ def api_key_required(f):
     @wraps(f)
     def wrapped(*args, **kwargs):
         key = request.headers.get("X-API-Key")
-        expected = os.environ.get("BUZ_API_KEY")
+        expected = os.environ.get("API_KEY")
         if not expected or key != expected:
             return jsonify({"error": "Invalid or missing API key"}), 401
         return f(*args, **kwargs)

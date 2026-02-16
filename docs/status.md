@@ -207,7 +207,7 @@ Needs work:
 ## API Interface
 
 ### Authentication
-- API key via `X-API-Key` header, validated against `BUZ_API_KEY` env var
+- API key via `X-API-Key` header, validated against `API_KEY` env var
 - CSRF exempted for API blueprint
 
 ### Implemented Endpoints
@@ -230,7 +230,7 @@ Needs work:
 
 ### Implementation
 - Flask Blueprint in `routes/api.py` at `/api/v1`
-- `@api_key_required` decorator checks `X-API-Key` header against `BUZ_API_KEY` env var
+- `@api_key_required` decorator checks `X-API-Key` header against `API_KEY` env var
 - JSON envelope: `{"data": ...}` for success, `{"error": "message"}` for errors
 - 10 tests in `tests/test_api.py`
 
