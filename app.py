@@ -365,39 +365,40 @@ def eta_report_sync(obfuscated_id: str):
 
 
 def _run_eta_report_job(job_id: str, obfuscated_id: str) -> None:
-    db = get_db()
-    try:
-        update_job(job_id, pct=5, message="Loading customer…", db=db)
-        template, context, status = build_eta_report_context(obfuscated_id, db=db)
-        context.setdefault("obfuscated_id", obfuscated_id)
-        update_job(
-            job_id,
-            pct=100,
-            message="Ready",
-            result={
-                "template": template,
-                "context": context,
-                "status": status,
-                "obfuscated_id": obfuscated_id,
-            },
-            done=True,
-            db=db,
-        )
-    except Exception as exc:
-        sentry_sdk.capture_exception(
-            exc,
-            scope=lambda scope: scope.set_context(
-                "job",
-                {"job_id": job_id, "obfuscated_id": obfuscated_id}
-            ),
-        )
-        update_job(job_id, error=str(exc), message="Job failed", db=db)
-        raise
-    finally:
+    with app.app_context():
+        db = get_db()
         try:
-            db.close()
-        except Exception:
-            pass
+            update_job(job_id, pct=5, message="Loading customer…", db=db)
+            template, context, status = build_eta_report_context(obfuscated_id, db=db)
+            context.setdefault("obfuscated_id", obfuscated_id)
+            update_job(
+                job_id,
+                pct=100,
+                message="Ready",
+                result={
+                    "template": template,
+                    "context": context,
+                    "status": status,
+                    "obfuscated_id": obfuscated_id,
+                },
+                done=True,
+                db=db,
+            )
+        except Exception as exc:
+            sentry_sdk.capture_exception(
+                exc,
+                scope=lambda scope: scope.set_context(
+                    "job",
+                    {"job_id": job_id, "obfuscated_id": obfuscated_id}
+                ),
+            )
+            update_job(job_id, error=str(exc), message="Job failed", db=db)
+            raise
+        finally:
+            try:
+                db.close()
+            except Exception:
+                pass
 
 
 @app.route("/<obfuscated_id>")
@@ -412,13 +413,15 @@ def eta_report(obfuscated_id: str):
 
 @app.post("/eta/start")
 def start_eta():
-    instance = (request.json or {}).get("instance") or "DD"  # pick your default/param
+    obfuscated_id = (request.json or {}).get("obfuscated_id")
+    if not obfuscated_id:
+        return jsonify({"error": "obfuscated_id is required"}), 400
     job_id = secrets.token_hex(16)
     create_job(job_id)
 
     t = threading.Thread(
         target=run_eta_job,
-        args=(app, job_id, instance),
+        args=(app, job_id, obfuscated_id),
         daemon=True,
     )
     current_app.logger.info("Spawned %s", t.name)

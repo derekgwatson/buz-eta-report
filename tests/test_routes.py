@@ -40,7 +40,7 @@ def test_eta_start_returns_job_id(client, monkeypatch, logged_in_admin):
     # create_job writes to DB via g.db; stub to no-op
     monkeypatch.setattr("app.create_job", lambda job_id: None, raising=True)
 
-    r = client.post("/eta/start", data=json.dumps({"instance": "DD"}), content_type="application/json")
+    r = client.post("/eta/start", data=json.dumps({"obfuscated_id": "abc123"}), content_type="application/json")
     assert r.status_code == 200
     payload = r.get_json()
     assert "job_id" in payload and isinstance(payload["job_id"], str) and len(payload["job_id"]) > 0
