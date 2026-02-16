@@ -5,7 +5,7 @@
   <h3 class="mb-3">Generating your report…</h3>
   <div id="status" class="text-muted mb-3" style="font-size: 1.1em;">Starting…</div>
   <div id="spinner" class="spinner-border text-primary" role="status">
-    <span class="sr-only">Loading...</span>
+    <span class="sr-only">Loading</span>
   </div>
 </div>
 
@@ -14,6 +14,16 @@
     width: 3rem;
     height: 3rem;
     border-width: 0.3em;
+  }
+  .sr-only {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    border: 0;
   }
 </style>
 
