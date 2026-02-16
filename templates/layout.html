@@ -144,17 +144,24 @@
         .actions form {
             display: inline;
             margin: 0;
+            margin-bottom: 0;
         }
-        .actions a, .actions button {
+        .actions a, .actions form button {
             text-decoration: none;
             color: white;
             font-weight: bold;
             padding: 5px 10px;
             border-radius: 4px;
             margin-right: 5px;
+            margin-bottom: 0;
             font-size: inherit;
             border: none;
             cursor: pointer;
+            width: auto;
+            display: inline-block;
+        }
+        .actions form input[type="hidden"] {
+            display: none;
         }
 
         .btn-edit {
