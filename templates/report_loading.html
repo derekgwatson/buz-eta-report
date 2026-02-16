@@ -1,37 +1,59 @@
 {% extends "layout.html" %}
 {% block title %}Generating report…{% endblock %}
 {% block content %}
-<div class="container py-4">
-  <h3 class="mb-3">Generating your report…</h3>
-  <div id="status" class="text-muted mb-3" style="font-size: 1.1em;">Starting…</div>
-  <div id="spinner" class="spinner-border text-primary" role="status">
-    <span class="sr-only">Loading</span>
+<div class="loading-container">
+  <div class="loading-spinner">
+    <div class="dot dot1"></div>
+    <div class="dot dot2"></div>
+    <div class="dot dot3"></div>
   </div>
+  <h3>Generating your report</h3>
+  <p id="status" class="loading-status">This may take a few moments</p>
 </div>
 
 <style>
-  .spinner-border {
-    width: 3rem;
-    height: 3rem;
-    border-width: 0.3em;
+  .loading-container {
+    text-align: center;
+    padding: 60px 20px;
   }
-  .sr-only {
-    position: absolute;
-    width: 1px;
-    height: 1px;
-    padding: 0;
-    margin: -1px;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    border: 0;
+  .loading-container h3 {
+    color: #333;
+    font-weight: 500;
+    margin-bottom: 8px;
   }
+  .loading-status {
+    color: #888;
+    font-size: 0.95em;
+  }
+  .loading-spinner {
+    display: flex;
+    justify-content: center;
+    gap: 8px;
+    margin-bottom: 30px;
+  }
+  .dot {
+    width: 12px;
+    height: 12px;
+    background-color: #4CAF50;
+    border-radius: 50%;
+    animation: bounce 1.4s ease-in-out infinite;
+  }
+  .dot2 { animation-delay: 0.16s; }
+  .dot3 { animation-delay: 0.32s; }
+  @keyframes bounce {
+    0%, 80%, 100% { transform: scale(0.4); opacity: 0.4; }
+    40% { transform: scale(1); opacity: 1; }
+  }
+
+  .alert { padding: 12px 16px; border-radius: 6px; margin-top: 20px; text-align: left; max-width: 500px; margin-left: auto; margin-right: auto; }
+  .alert-danger { background-color: #fce4e4; border: 1px solid #f5c6c6; color: #8b1a1a; }
+  .alert-warning { background-color: #fff8e1; border: 1px solid #ffe082; color: #7a6200; }
 </style>
 
 <script>
 (function() {
   const jobId = "{{ job_id }}";
   const statusEl = document.getElementById('status');
-  const spinnerEl = document.getElementById('spinner');
 
   function htmlEscape(s){ return (s||"").toString().replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[m])); }
 
@@ -41,32 +63,26 @@
       if (!res.ok) throw new Error("status " + res.status);
       const data = await res.json();
 
-      // Show current status (just the latest log message)
-      const logs = Array.isArray(data.log) ? data.log : [];
-      const currentStatus = logs.length > 0 ? logs[logs.length - 1] : "Working…";
-      statusEl.innerHTML = htmlEscape(currentStatus);
-
       if (data.status === "completed") {
-        // Navigate to the final rendered report
         window.location.replace(`/report/${jobId}`);
         return;
       }
 
       if (data.status === "failed") {
-        spinnerEl.style.display = 'none';
-        let html = `<div class="alert alert-danger" role="alert">
+        document.querySelector('.loading-spinner').style.display = 'none';
+        let html = `<div class="alert alert-danger">
           <strong>Unable to generate report</strong><br>
           ${htmlEscape(data.error||"An unexpected error occurred. Please try again or contact support.")}
         </div>`;
         if (data.traceback) {
-          html += `<pre class="mt-3 text-muted small">${htmlEscape(data.traceback)}</pre>`;
+          html += `<pre style="margin-top:12px;color:#888;font-size:0.85em;">${htmlEscape(data.traceback)}</pre>`;
         }
         statusEl.innerHTML = html;
         return;
       }
     } catch (e) {
-      spinnerEl.style.display = 'none';
-      statusEl.innerHTML = `<div class="alert alert-warning" role="alert">
+      document.querySelector('.loading-spinner').style.display = 'none';
+      statusEl.innerHTML = `<div class="alert alert-warning">
         <strong>Connection issue</strong><br>
         We're having trouble checking the status of your report. Please refresh this page.
       </div>`;

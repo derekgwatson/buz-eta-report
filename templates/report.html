@@ -152,21 +152,9 @@
 <div class="header">
   <h1>Open Orders for {{ customer_name }}</h1>
 
-{% if source == "cache-503" %}
+{% if source in ("cache-503", "cache-timeout", "cache-connection") %}
   <div class="alert alert-warning py-2 my-2">
-    <strong>Note:</strong> Data may not be current - supplier system is currently unavailable.
-    {% if last_dd %}DD last refreshed: {{ last_dd }}. {% endif %}
-    {% if last_cbr %}CBR last refreshed: {{ last_cbr }}.{% endif %}
-  </div>
-{% elif source == "cache-timeout" %}
-  <div class="alert alert-warning py-2 my-2">
-    <strong>Note:</strong> Data may not be current - supplier system is not responding.
-    {% if last_dd %}DD last refreshed: {{ last_dd }}. {% endif %}
-    {% if last_cbr %}CBR last refreshed: {{ last_cbr }}.{% endif %}
-  </div>
-{% elif source == "cache-connection" %}
-  <div class="alert alert-warning py-2 my-2">
-    <strong>Note:</strong> Data may not be current - unable to connect to supplier system.
+    <strong>Note:</strong> Showing recently cached data.
     {% if last_dd %}DD last refreshed: {{ last_dd }}. {% endif %}
     {% if last_cbr %}CBR last refreshed: {{ last_cbr }}.{% endif %}
   </div>
