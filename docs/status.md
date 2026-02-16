@@ -39,20 +39,20 @@ BuzETA is the **ETA Report Generator** - a Flask web app that fetches order data
 ### Known Issues / Bugs
 
 #### Security Issues
-1. **Missing auth on `delete_customer` and `edit_customer`** (`app.py:625-657`) - No `@login_required` or `@role_required` decorators. Any unauthenticated user can delete or edit customers via GET/POST.
-2. **SQL injection in `update_status_mapping`** (`services/update_status_mapping.py:7-14`) - Uses string formatting (`f"('{s}')"`) to build SQL VALUES. Should use parameterized queries.
-3. **`delete_customer` uses GET** (`app.py:625-628`) - Destructive action on a GET route. Should be POST/DELETE to prevent CSRF via link/image tags.
-4. **`toggle_user_status` uses GET** (`app.py:681-692`) - Same issue as above; state-changing action on GET.
-5. **`delete_user` uses GET** (`app.py:695-700`) - Same issue.
-6. **Sentry debug route exposed** (`app.py:704-707`) - `/sentry-debug` triggers `1/0` with no auth guard. Could be used for DoS or error-log flooding.
-7. **`_backup_sqlite` vulnerable to path injection** (`services/migrations.py:14`) - Uses f-string in SQL: `VACUUM INTO '{path}'`. If `backup_dir` contained a single quote, this would break or allow injection.
+1. ~~**Missing auth on `delete_customer` and `edit_customer`**~~ - **FIXED**: Added `@login_required` + `@role_required("admin")` decorators.
+2. ~~**SQL injection in `update_status_mapping`**~~ - **FIXED**: Replaced f-string interpolation with parameterized queries.
+3. ~~**`delete_customer` uses GET**~~ - **FIXED**: Changed to POST with CSRF-protected form.
+4. ~~**`toggle_user_status` uses GET**~~ - **FIXED**: Changed to POST with CSRF-protected form.
+5. ~~**`delete_user` uses GET**~~ - **FIXED**: Changed to POST with CSRF-protected form.
+6. ~~**Sentry debug route exposed**~~ - **FIXED**: Added `@login_required` + `@role_required("admin")`.
+7. ~~**`_backup_sqlite` vulnerable to path injection**~~ - **FIXED**: Single quotes escaped in VACUUM INTO path.
 
 #### Functional Bugs
-8. **`get_status_mappings` closes the shared connection** (`services/update_status_mapping.py:41`) - Calls `conn.close()` on the connection it receives. Since this is `g.db` in request context, it will break subsequent DB access in the same request.
-9. **`eta_worker.run_eta_job` references non-existent `eta_cache` table** (`services/eta_worker.py:12-29`) - `load_cache` and `save_cache` reference an `eta_cache` table that is never created by any migration. This code path will always fail.
-10. **Duplicate `update_status_mapping` function** - Defined in both `services/database.py:15-31` and `services/update_status_mapping.py:6-29`. The `database.py` version (parameterized, correct) shadows the other when imported.
-11. **`run_eta_job` signature mismatch** (`services/eta_worker.py:56`) - Takes `(app, job_id, obfuscated_id)` but `start_eta` route (`app.py:415-427`) calls it with `(app, job_id, instance)` where `instance` is "DD"/"CBR", not an `obfuscated_id`.
-12. **`_run_eta_report_job` uses `get_db()` outside request** (`app.py:368`) - Called in a ThreadPoolExecutor but uses `get_db()` which relies on `g` (Flask request context). The thread won't have `g`, so each call creates an unmanaged connection that may not be properly closed.
+8. ~~**`get_status_mappings` closes the shared connection**~~ - **FIXED**: Removed premature `conn.close()`.
+9. ~~**`eta_worker.run_eta_job` references non-existent `eta_cache` table**~~ - **FIXED**: Removed dead `load_cache`/`save_cache`/`_fetch_live_or_cached`; rewrote `run_eta_job` to call `build_eta_report_context` directly.
+10. ~~**Duplicate `update_status_mapping` function**~~ - **FIXED**: Removed duplicate from `database.py`.
+11. ~~**`run_eta_job` signature mismatch**~~ - **FIXED**: Changed `/eta/start` to accept `obfuscated_id` instead of `instance`.
+12. ~~**`_run_eta_report_job` uses `get_db()` outside request**~~ - **FIXED**: Wrapped in `app.app_context()` so downstream `current_app` calls work in background threads.
 
 #### Code Quality / Warnings
 13. **15 `ResourceWarning: unclosed database` warnings in tests** - Database connections opened in background threads aren't being closed reliably.
@@ -158,25 +158,13 @@ BuzETA is the **ETA Report Generator** - a Flask web app that fetches order data
 
 ## Code Review Findings
 
-### High Priority (Security)
+### High Priority (Security) — ALL FIXED
 
-| # | Issue | File:Line | Severity |
-|---|-------|-----------|----------|
-| 1 | `delete_customer` and `edit_customer` have no auth | `app.py:625-657` | Critical |
-| 2 | SQL injection in `update_status_mapping` | `update_status_mapping.py:7-14` | Critical |
-| 3 | Destructive actions on GET routes (delete_customer, toggle_user, delete_user) | `app.py:625,681,695` | High |
-| 6 | Unprotected `/sentry-debug` route | `app.py:704-707` | Medium |
-| 7 | Path injection in `_backup_sqlite` | `migrations.py:14` | Low |
+All security issues (#1-#7) resolved. Auth decorators added, GET routes changed to POST with CSRF forms, SQL/path injection fixed.
 
-### Medium Priority (Bugs)
+### Medium Priority (Bugs) — ALL FIXED
 
-| # | Issue | File:Line | Impact |
-|---|-------|-----------|--------|
-| 8 | `get_status_mappings` closes shared `g.db` connection | `update_status_mapping.py:41` | Breaks subsequent DB ops in same request |
-| 9 | `eta_cache` table doesn't exist (dead code in eta_worker) | `eta_worker.py:12-29` | Worker cache path will always fail |
-| 10 | Duplicate `update_status_mapping` function across files | `database.py:15` / `update_status_mapping.py:6` | Confusing; one may mask the other |
-| 11 | `run_eta_job` parameter mismatch (instance vs obfuscated_id) | `eta_worker.py:56` / `app.py:420` | start_eta route is broken |
-| 12 | `_run_eta_report_job` uses `get_db()` in thread without request context | `app.py:368` | Unclosed connections, ResourceWarnings |
+All functional bugs (#8-#12) resolved. Dead code removed, parameter mismatches fixed, app context added to background threads.
 
 ### Low Priority (Best Practices)
 
@@ -251,13 +239,13 @@ Currently the app has no structured API. Below is a proposed API design for bot-
 
 ## Next Steps
 
-### High Priority
-- [ ] Fix critical security issues (#1, #2, #3 above)
-- [ ] Add auth to delete_customer and edit_customer routes
-- [ ] Change destructive GET routes to POST
-- [ ] Fix `get_status_mappings` closing shared connection
-- [ ] Remove or fix dead eta_worker cache code
-- [ ] Fix `run_eta_job` parameter mismatch
+### High Priority — DONE
+- [x] Fix critical security issues (#1, #2, #3 above)
+- [x] Add auth to delete_customer and edit_customer routes
+- [x] Change destructive GET routes to POST
+- [x] Fix `get_status_mappings` closing shared connection
+- [x] Remove or fix dead eta_worker cache code
+- [x] Fix `run_eta_job` parameter mismatch
 
 ### Medium Priority
 - [ ] Increase test coverage on eta_report.py (11% -> 80%+)
