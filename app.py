@@ -156,8 +156,13 @@ def create_app(testing: bool = False) -> tuple[Flask, str]:
         app.config["REMEMBER_COOKIE_DURATION"] = timedelta(minutes=60)
 
     # CSRF, OAuth, Login manager
-    CSRFProtect(app)
+    csrf = CSRFProtect(app)
     oauth.init_app(app)
+
+    # API blueprint (exempt from CSRF — uses API key auth)
+    from routes.api import api_bp
+    app.register_blueprint(api_bp)
+    csrf.exempt(api_bp)
     login_manager.init_app(app)
     login_manager.login_view = "login"
     login_manager.login_message = "Please log in to access this page."

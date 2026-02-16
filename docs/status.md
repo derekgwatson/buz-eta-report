@@ -204,38 +204,35 @@ Needs work:
   app.py                          61%
 ```
 
-## API Interface (Proposed)
-
-Currently the app has no structured API. Below is a proposed API design for bot-to-bot integration.
+## API Interface
 
 ### Authentication
-- API key via `X-API-Key` header (new `api_keys` table or env var)
-- Existing session auth for browser clients
+- API key via `X-API-Key` header, validated against `BUZ_API_KEY` env var
+- CSRF exempted for API blueprint
 
-### Proposed Endpoints
+### Implemented Endpoints
 
 | Method | Endpoint | Purpose | Response |
 |--------|----------|---------|----------|
-| GET | `/api/v1/customers` | List all customers | `[{id, display_name, obfuscated_id, field_type, dd_name, cbr_name}]` |
-| GET | `/api/v1/customers/<obfuscated_id>` | Get single customer | `{id, display_name, ...}` |
-| POST | `/api/v1/customers` | Create customer | `{id, obfuscated_id, ...}` |
-| PUT | `/api/v1/customers/<id>` | Update customer | `{id, ...}` |
-| DELETE | `/api/v1/customers/<id>` | Delete customer | `204` |
-| GET | `/api/v1/reports/<obfuscated_id>` | Get report data (JSON) | `{customer_name, orders: [...], source, statuses, groups}` |
-| POST | `/api/v1/reports/<obfuscated_id>/generate` | Start async report | `{job_id}` |
-| GET | `/api/v1/jobs/<job_id>` | Job status/progress | `{status, pct, done, error, result}` |
-| GET | `/api/v1/reports/<obfuscated_id>/download?format=csv` | Download report | File download |
-| GET | `/api/v1/statuses` | List status mappings | `[{id, odata_status, custom_status, active}]` |
-| POST | `/api/v1/statuses/refresh` | Sync from OData | `{count}` |
-| GET | `/api/v1/health` | Health check | `{status: "ok", db: true, cache_entries: N}` |
+| GET | `/api/v1/customers` | List all customers | `{"data": [{id, display_name, obfuscated_id, field_type, dd_name, cbr_name}]}` |
+| POST | `/api/v1/customers` | Create customer | `{"data": {id, obfuscated_id, report_url, ...}}` (201) |
 
-### Implementation Notes
-- Use Flask Blueprints: `api_bp = Blueprint("api", __name__, url_prefix="/api/v1")`
-- Return JSON with consistent envelope: `{"data": ..., "meta": {"source": "live|cache"}}`
-- Error responses: `{"error": "message", "code": "NOT_FOUND"}`
-- Add `@api_key_required` decorator that checks `X-API-Key` header
-- Reuse existing service layer (buz_data, export, job_service) - no new business logic needed
-- Consider OpenAPI/Swagger docs via flask-smorest or flasgger
+### Proposed (Not Yet Implemented)
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/customers/<obfuscated_id>` | Get single customer |
+| PUT | `/api/v1/customers/<id>` | Update customer |
+| DELETE | `/api/v1/customers/<id>` | Delete customer |
+| POST | `/api/v1/reports/<obfuscated_id>/generate` | Start async report |
+| GET | `/api/v1/jobs/<job_id>` | Job status/progress |
+| GET | `/api/v1/health` | Health check |
+
+### Implementation
+- Flask Blueprint in `routes/api.py` at `/api/v1`
+- `@api_key_required` decorator checks `X-API-Key` header against `BUZ_API_KEY` env var
+- JSON envelope: `{"data": ...}` for success, `{"error": "message"}` for errors
+- 10 tests in `tests/test_api.py`
 
 ## Next Steps
 
@@ -251,7 +248,7 @@ Currently the app has no structured API. Below is a proposed API design for bot-
 - [ ] Increase test coverage on eta_report.py (11% -> 80%+)
 - [ ] Increase test coverage on update_status_mapping.py
 - [ ] Extract app.py routes into Blueprints
-- [ ] Add API interface (Blueprint with JSON endpoints + API key auth)
+- [x] Add API interface (Blueprint with JSON endpoints + API key auth)
 - [x] Clean up dead code (fetch_with_stale_if_error, _cache_key, duplicate update_status_mapping)
 - [x] Fix bare except clauses
 - [ ] Add rate limiting on public routes
