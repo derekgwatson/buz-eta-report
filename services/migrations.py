@@ -11,7 +11,8 @@ def _backup_sqlite(conn, backup_dir: str | None = None) -> str:
         backup_dir = os.path.dirname(conn.execute("PRAGMA database_list").fetchone()[2])
     ts = datetime.now().strftime("%Y%m%d-%H%M%S")
     path = os.path.join(backup_dir, f"db-backup-{ts}.sqlite3")
-    conn.execute(f"VACUUM INTO '{path}'")
+    safe_path = path.replace("'", "''")
+    conn.execute(f"VACUUM INTO '{safe_path}'")
     return path
 
 

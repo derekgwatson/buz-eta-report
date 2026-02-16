@@ -4,28 +4,23 @@ from services.buz_data import get_statuses
 
 
 def update_status_mapping(odata_statuses):
-    # Mark old statuses as inactive
-    execute_query('''
-    UPDATE status_mapping 
-    SET active = FALSE 
-    WHERE odata_status NOT IN (
-        SELECT odata_status FROM (VALUES {}) 
-    );
-    '''.format(', '.join(f"('{s}')" for s in odata_statuses)))
+    statuses = list(dict.fromkeys(odata_statuses or []))
 
-    # Insert new or reactivate existing statuses
-    for status in odata_statuses:
+    if statuses:
+        placeholders = ",".join("?" for _ in statuses)
+        execute_query(
+            f"UPDATE status_mapping SET active = FALSE "
+            f"WHERE odata_status NOT IN ({placeholders})",
+            tuple(statuses),
+        )
+    else:
+        execute_query("UPDATE status_mapping SET active = FALSE")
+
+    for status in statuses:
         execute_query('''
-        INSERT INTO status_mapping (odata_status, active) 
+        INSERT INTO status_mapping (odata_status, active)
         VALUES (?, TRUE)
         ON CONFLICT (odata_status) DO UPDATE SET active = TRUE;
-        ''', (status,))
-
-    # Insert any new statuses into the `status_mapping` table
-    for status in odata_statuses:
-        execute_query('''
-        INSERT OR IGNORE INTO status_mapping (odata_status, active)
-        VALUES (?, TRUE);
         ''', (status,))
 
 
@@ -37,7 +32,6 @@ def get_status_mappings(conn):
     FROM status_mapping ORDER BY active DESC, odata_status;
     ''')
     mappings = cursor.fetchall()
-    conn.close()
     return mappings
 
 

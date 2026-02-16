@@ -31,7 +31,7 @@ def app(_env):
     # _env fixture dependency ensures environment is set up first
     import app as app_module
     import logging
-    app_module.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False)
+    app_module.app.config.update(TESTING=True, WTF_CSRF_ENABLED=False, TRAP_HTTP_EXCEPTIONS=False)
     logging.disable(logging.CRITICAL)  # silence everything during tests
     return app_module.app
 

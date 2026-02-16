@@ -43,15 +43,22 @@
             <td>
                 <a href="{{ url_for('edit_user', user_id=user[0]) }}" class="btn btn-primary btn-sm">Edit</a>
                 &nbsp;
-                <a href="{{ url_for('toggle_user_status', user_id=user[0]) }}" class="btn btn-warning btn-sm">
-                    {% if user[4] == 1 %}
-                        Deactivate
-                    {% else %}
-                        Activate
-                    {% endif %}
-                </a>
+                <form method="POST" action="{{ url_for('toggle_user_status', user_id=user[0]) }}" style="display:inline;">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-warning btn-sm">
+                        {% if user[4] == 1 %}
+                            Deactivate
+                        {% else %}
+                            Activate
+                        {% endif %}
+                    </button>
+                </form>
                 &nbsp;
-                <a href="{{ url_for('delete_user', user_id=user[0]) }}" class="btn btn-danger btn-sm" onclick="return confirm('Are you sure?');">Delete</a>
+                <form method="POST" action="{{ url_for('delete_user', user_id=user[0]) }}" style="display:inline;"
+                      onsubmit="return confirm('Are you sure?');">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+                    <button type="submit" class="btn btn-danger btn-sm">Delete</button>
+                </form>
             </td>
         </tr>
     {% endfor %}

@@ -272,8 +272,40 @@ def test_toggle_user_status(client, monkeypatch, logged_in_admin):
     called = {}
     def _upd(sql, params=(), one=False, logger=None): called["params"] = params
     monkeypatch.setattr("app.query_db", lambda *a, **k: (1,) if "SELECT active" in a[0] else _upd(*a, **k), raising=True)
-    r = client.get("/toggle_user_status/5", follow_redirects=False)
+    r = client.post("/toggle_user_status/5", follow_redirects=False)
     assert r.status_code == 302
+
+
+# ---------- Auth & method enforcement ----------
+
+def test_delete_customer_requires_auth(client):
+    r = client.post("/delete/1")
+    assert r.status_code in (302, 401)
+
+
+def test_edit_customer_requires_auth(client):
+    r = client.get("/edit/1")
+    assert r.status_code in (302, 401)
+
+
+def test_delete_customer_rejects_get(client, logged_in_admin):
+    r = client.get("/delete/1")
+    assert r.status_code == 405
+
+
+def test_delete_user_rejects_get(client, logged_in_admin):
+    r = client.get("/delete_user/1")
+    assert r.status_code == 405
+
+
+def test_toggle_user_rejects_get(client, logged_in_admin):
+    r = client.get("/toggle_user_status/1")
+    assert r.status_code == 405
+
+
+def test_sentry_debug_requires_auth(client):
+    r = client.get("/sentry-debug")
+    assert r.status_code in (302, 401)
 
 
 # ---------- Misc ----------

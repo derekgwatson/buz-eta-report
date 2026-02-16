@@ -622,13 +622,17 @@ def add_user():
     return redirect(url_for("manage_users"))
 
 
-@app.route('/delete/<int:customer_id>')
+@app.route('/delete/<int:customer_id>', methods=["POST"])
+@login_required
+@role_required("admin")
 def delete_customer(customer_id):
     query_db("DELETE FROM customers WHERE id = ?", (customer_id,))
     return redirect(url_for('admin'))
 
 
 @app.route('/edit/<int:customer_id>', methods=['GET', 'POST'])
+@login_required
+@role_required("admin")
 def edit_customer(customer_id):
     if request.method == 'POST':
         # Fetch updated form data
@@ -678,7 +682,7 @@ def edit_user(user_id: int):
     return render_template("edit_user.html", user=dict(user))
 
 
-@app.route("/toggle_user_status/<int:user_id>")
+@app.route("/toggle_user_status/<int:user_id>", methods=["POST"])
 @login_required
 @role_required("admin")
 def toggle_user_status(user_id: int):
@@ -692,7 +696,7 @@ def toggle_user_status(user_id: int):
     return redirect(url_for("manage_users"))
 
 
-@app.route("/delete_user/<int:user_id>")
+@app.route("/delete_user/<int:user_id>", methods=["POST"])
 @login_required
 @role_required("admin")
 def delete_user(user_id: int):
@@ -702,6 +706,8 @@ def delete_user(user_id: int):
 
 # ---------- misc ----------
 @app.route("/sentry-debug")
+@login_required
+@role_required("admin")
 def trigger_error():
     _ = 1 / 0
     return "ok"

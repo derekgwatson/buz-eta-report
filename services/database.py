@@ -11,26 +11,6 @@ def _raise_in_dev() -> bool:
     )
 
 
-# Initialize the database connection using Flask's `g`
-def update_status_mapping(odata_statuses, conn=None):
-    conn = conn or get_db()
-    statuses = list(dict.fromkeys(odata_statuses or []))
-
-    if statuses:
-        placeholders = ",".join("?" for _ in statuses)
-        conn.execute(f"UPDATE status_mapping SET active = 0 WHERE odata_status NOT IN ({placeholders})", statuses)
-    else:
-        # If nothing from OData, mark all inactive
-        conn.execute("UPDATE status_mapping SET active = 0")
-
-    conn.executemany(
-        "INSERT INTO status_mapping (odata_status, active) VALUES (?, 1) "
-        "ON CONFLICT(odata_status) DO UPDATE SET active = 1",
-        [(s,) for s in statuses]
-    )
-    conn.commit()
-
-
 def create_db_tables(conn=None):
     execute_query('''
         CREATE TABLE IF NOT EXISTS users (
