@@ -49,7 +49,7 @@
             </td>
             <td class="actions">
                 <a href="{{ url_for('edit_customer', customer_id=customer[0]) }}" class="btn-edit">Edit</a>
-                <form method="POST" action="{{ url_for('delete_customer', customer_id=customer[0]) }}" style="display:inline;"
+                <form method="POST" action="{{ url_for('delete_customer', customer_id=customer[0]) }}"
                       onsubmit="return confirm('Are you sure you want to delete {{ customer[5] or customer[1] or customer[2] }}?');">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                     <button type="submit" class="btn-delete">Delete</button>
