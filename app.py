@@ -220,6 +220,14 @@ def create_app(testing: bool = False) -> tuple[Flask, str]:
         if db:
             db.close()
 
+    # Register API Blueprint (exempt from CSRF — uses API key auth)
+    from api import create_api_bp
+    api_bp = create_api_bp()
+    app.register_blueprint(api_bp)
+    csrf = app.extensions.get("csrf")
+    if csrf:
+        csrf.exempt(api_bp)
+
     return app, env
 
 

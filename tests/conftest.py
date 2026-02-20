@@ -21,6 +21,8 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("BUZ_DD_PASSWORD", "test-dd-pass")
     monkeypatch.setenv("BUZ_CBR_USERNAME", "test-cbr-user")
     monkeypatch.setenv("BUZ_CBR_PASSWORD", "test-cbr-pass")
+    # API key for testing
+    monkeypatch.setenv("BUZ_API_KEY", "test-api-key-12345")
     # silence Sentry during tests
     monkeypatch.setattr("sentry_sdk.init", lambda *a, **k: None, raising=True)
 
@@ -48,6 +50,12 @@ def logged_in_admin(monkeypatch):
     fake = SimpleNamespace(is_authenticated=True, role="admin", id=1, name="Test Admin", email="t@example.com")
     monkeypatch.setattr("flask_login.utils._get_user", lambda: fake, raising=True)
     return fake
+
+
+@pytest.fixture
+def api_headers():
+    """Standard headers for authenticated API requests."""
+    return {"X-API-Key": "test-api-key-12345", "Content-Type": "application/json"}
 
 
 @pytest.fixture(autouse=True, scope="session")

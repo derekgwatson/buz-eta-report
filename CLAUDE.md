@@ -45,6 +45,30 @@ pytest -v
 pytest tests/test_routes.py::test_admin_page
 ```
 
+### API
+The `/api/v1/` REST API is implemented as a Flask Blueprint in the `api/` package.
+
+**Authentication**: API key via `X-API-Key` header. Set `BUZ_API_KEY` environment variable.
+
+**Endpoints**:
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| GET | `/api/v1/customers` | List all customers |
+| GET | `/api/v1/customers/<obfuscated_id>` | Get single customer |
+| POST | `/api/v1/customers` | Create customer |
+| PUT | `/api/v1/customers/<obfuscated_id>` | Update customer |
+| DELETE | `/api/v1/customers/<obfuscated_id>` | Delete customer |
+| POST | `/api/v1/reports/<obfuscated_id>/generate` | Start async report (returns job_id) |
+| GET | `/api/v1/reports/<obfuscated_id>/download?format=csv\|xlsx` | Download report |
+| GET | `/api/v1/jobs/<job_id>` | Job status/progress |
+| GET | `/api/v1/statuses` | List status mappings |
+| POST | `/api/v1/statuses/refresh` | Sync statuses from OData |
+| GET | `/api/v1/health` | Health check (no auth required) |
+
+**Response format**: `{"data": ..., "meta": {...}}` on success, `{"error": "message", "code": "ERROR_CODE"}` on error.
+
+**Bot workflow**: Create customer -> POST generate -> Poll GET jobs/<id> -> GET download
+
 ### Cache Prewarming
 ```bash
 # Prewarm cache for all customers (before blackout periods)
@@ -185,6 +209,7 @@ Production-only:
 Optional:
 - `APP_ENV`: Environment (development/production/staging)
 - `SENTRY_DISABLED`: Set to "1" to disable Sentry
+- `BUZ_API_KEY`: API key for REST API authentication (required for /api/v1/* endpoints except /health)
 
 ## Common Gotchas
 
