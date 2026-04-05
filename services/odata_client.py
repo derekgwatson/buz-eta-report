@@ -2,7 +2,6 @@ from datetime import datetime
 import os
 import requests
 from requests.auth import HTTPBasicAuth
-from dotenv import load_dotenv
 import logging
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
@@ -56,9 +55,6 @@ class ODataClient:
         Args:
             source (str): The OData source we're getting data from
         """
-        # Load environment variables from .env file
-        load_dotenv()
-
         if source == 'DD':
             self.root_url = "https://api.buzmanager.com/reports/DESDR"
             self.username = os.getenv("BUZ_DD_USERNAME")
@@ -118,7 +114,7 @@ class ODataClient:
                 from flask import current_app
                 if current_app:
                     current_app.logger.error(f"OData request failed: {url}?$filter={filter_query} - Error: {e}")
-            except:
+            except Exception:
                 pass
             raise
 
@@ -142,7 +138,13 @@ class ODataClient:
             order_id = item.get("RefNo")
             date_scheduled = item.get("DateScheduled")
             if order_id and date_scheduled:
-                parsed_date = datetime.strptime(date_scheduled, "%Y-%m-%dT%H:%M:%SZ")
+                try:
+                    parsed_date = datetime.strptime(date_scheduled, "%Y-%m-%dT%H:%M:%SZ")
+                except (ValueError, TypeError):
+                    try:
+                        parsed_date = datetime.fromisoformat(date_scheduled.replace("Z", "+00:00"))
+                    except (ValueError, TypeError):
+                        continue
                 if order_id not in latest_dates or parsed_date > latest_dates[order_id]:
                     latest_dates[order_id] = parsed_date
 

@@ -148,21 +148,17 @@ def create_app(testing: bool = False) -> tuple[Flask, str]:
     app.secret_key = os.getenv("FLASK_SECRET")
     app.permanent_session_lifetime = timedelta(minutes=30)
 
-    # Cookies in production
+    # Cookie security — safe defaults for all environments
+    app.config["SESSION_COOKIE_HTTPONLY"] = True
+    app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
     if env == "production":
         app.config["SESSION_COOKIE_SECURE"] = True
-        app.config["SESSION_COOKIE_HTTPONLY"] = True
-        app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
         app.config["REMEMBER_COOKIE_DURATION"] = timedelta(minutes=60)
 
     # CSRF, OAuth, Login manager
     csrf = CSRFProtect(app)
     oauth.init_app(app)
 
-    # API blueprint (exempt from CSRF — uses API key auth)
-    from routes.api import api_bp
-    app.register_blueprint(api_bp)
-    csrf.exempt(api_bp)
     login_manager.init_app(app)
     login_manager.login_view = "login"
     login_manager.login_message = "Please log in to access this page."
@@ -623,17 +619,23 @@ def manage_users():
 @login_required
 @role_required("admin")
 def add_user():
-    email = request.form["email"]
-    name = request.form["name"]
-    role = request.form["role"]
+    email = (request.form.get("email") or "").strip()
+    name = (request.form.get("name") or "").strip()
+    role = (request.form.get("role") or "").strip()
+
+    if not email or "@" not in email:
+        abort(400, "A valid email address is required.")
+    if not name:
+        abort(400, "Name is required.")
+    if role not in {"admin", "user"}:
+        abort(400, "Role must be 'admin' or 'user'.")
+
     try:
         execute_query(
             "INSERT INTO users (email, name, role) VALUES (?, ?, ?)",
             (email, name, role),
         )
-        # flash("User added successfully.", "success")
     except ValueError:
-        # flash("Email already exists.", "danger")
         pass
     return redirect(url_for("manage_users"))
 
