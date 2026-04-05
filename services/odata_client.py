@@ -96,11 +96,12 @@ class ODataClient:
         filter_query = " and ".join(params)
         encoded_filter = {"$filter": filter_query}
 
-        # Log the full URL for debugging
+        # Log endpoint (without filter values that may contain customer names)
+        filter_count = len(params)
         try:
             from flask import current_app
             if current_app:
-                current_app.logger.info(f"OData GET: {url}?$filter={filter_query}")
+                current_app.logger.info(f"OData GET: {url} ({filter_count} filter conditions)")
         except Exception:
             pass
 
@@ -109,11 +110,10 @@ class ODataClient:
             response.raise_for_status()
 
         except requests.exceptions.RequestException as e:
-            # Log the error with the URL for debugging
             try:
                 from flask import current_app
                 if current_app:
-                    current_app.logger.error(f"OData request failed: {url}?$filter={filter_query} - Error: {e}")
+                    current_app.logger.error(f"OData request failed: {url} - {type(e).__name__}: {e}")
             except Exception:
                 pass
             raise

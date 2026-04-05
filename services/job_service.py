@@ -49,36 +49,40 @@ def update_job(job_id: str, pct: Optional[int] = None, message: Optional[str] = 
                error: Optional[str] = None, result=None, done: bool = False, db=None):
     db = _coerce_db(db)
 
-    row = _query_one(db, "SELECT log FROM jobs WHERE id=?", (job_id,))
-    logs = []
-    if row:
-        # sqlite3.Row supports both index and key access; handle both
-        val = row["log"] if "log" in getattr(row, "keys", lambda: [])() else row[0]
-        if val:
-            try:
-                logs = json.loads(val)
-            except Exception:
-                logs = []
-
-    if message:
-        logs.append(message)
-
     status = "failed" if error else ("completed" if done else "running")
     result_json = json.dumps(result) if result is not None else None
 
-    # ✅ keep previous pct when pct is None
-    _exec(
-        db,
-        """UPDATE jobs
-              SET pct = COALESCE(?, pct),
-                  log = ?,
-                  error = ?,
-                  result = ?,
-                  status = ?,
-                  updated_at = CURRENT_TIMESTAMP
-            WHERE id = ?""",
-        (pct, json.dumps(logs), error, result_json, status, job_id),
-    )
+    # Atomic log append via json_insert — no read-modify-write race.
+    # CASE handles corrupt/malformed log values by resetting to a fresh array.
+    if message:
+        _exec(
+            db,
+            """UPDATE jobs
+                  SET pct = COALESCE(?, pct),
+                      log = CASE
+                              WHEN json_valid(COALESCE(log, '[]'))
+                              THEN json_insert(COALESCE(log, '[]'), '$[#]', ?)
+                              ELSE json_array(?)
+                            END,
+                      error = ?,
+                      result = ?,
+                      status = ?,
+                      updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?""",
+            (pct, message, message, error, result_json, status, job_id),
+        )
+    else:
+        _exec(
+            db,
+            """UPDATE jobs
+                  SET pct = COALESCE(?, pct),
+                      error = ?,
+                      result = ?,
+                      status = ?,
+                      updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?""",
+            (pct, error, result_json, status, job_id),
+        )
     _commit(db)
 
 

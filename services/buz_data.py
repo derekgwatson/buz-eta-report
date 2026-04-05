@@ -9,6 +9,17 @@ from typing import List, Any
 from flask import current_app
 
 
+# Statuses that indicate an order is finished. Orders where ALL lines match
+# one of these are excluded from reports.  Update here when the OData source
+# adds new terminal statuses.
+FINISHED_STATUSES: frozenset[str] = frozenset({
+    "cancelled",
+    "invoiced",
+    "invoice ex gst fees - actioned in xero",
+    "invoice ex gst fees - not in xero",
+})
+
+
 def get_statuses(instance: str) -> dict:
     """
     Returns a dict with:
@@ -80,14 +91,7 @@ def fetch_and_process_orders(conn, odata_client, filter_conditions):
             if len(statuses) == 0:
                 return False
 
-            # Check if ALL non-null statuses are 'Cancelled' or 'Invoiced' (case-insensitive)
-            finished_statuses = {
-                'cancelled',
-                'invoiced',
-                'invoice ex gst fees - actioned in xero',
-                'invoice ex gst fees - not in xero'
-            }
-            all_finished = all(str(s).strip().lower() in finished_statuses for s in statuses)
+            all_finished = all(str(s).strip().lower() in FINISHED_STATUSES for s in statuses)
 
             return all_finished
 

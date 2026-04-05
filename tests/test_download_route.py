@@ -50,7 +50,7 @@ def test_download_csv_happy_path(client, monkeypatch, app_module):
     )
 
     # Let filters/order/export use real implementations
-    resp = client.get("/abcd123/download.csv?statusFilter=open&group=cutting&supplier=dd")
+    resp = client.get("/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download.csv?statusFilter=open&group=cutting&supplier=dd")
     assert resp.status_code == 200
     assert resp.mimetype.startswith("text/csv")
 
@@ -80,7 +80,7 @@ def test_download_xlsx_happy_path(client, monkeypatch, app_module):
         lambda *a, **k: (_rows_sample(), "Acme Widgets"),
     )
 
-    resp = client.get("/abcd123/download.xlsx?status=open&group=cutting&supplier=DD")
+    resp = client.get("/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download.xlsx?status=open&group=cutting&supplier=DD")
     assert resp.status_code == 200
     assert resp.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
 
@@ -102,7 +102,7 @@ def test_download_xlsx_happy_path(client, monkeypatch, app_module):
 
 def test_download_404_when_customer_missing(client, monkeypatch, app_module):
     monkeypatch.setattr(app_module, "fetch_report_rows_and_name", lambda *a, **k: (None, None))
-    resp = client.get("/nope/download.csv")
+    resp = client.get("/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/download.csv")
     assert resp.status_code == 404
 
 
@@ -112,7 +112,7 @@ def test_download_400_when_bad_format(client, monkeypatch, app_module):
         "fetch_report_rows_and_name",
         lambda *a, **k: (_rows_sample(), "Acme Widgets"),
     )
-    resp = client.get("/abcd123/download.pdf")
+    resp = client.get("/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download.pdf")
     assert resp.status_code == 400
 
 
@@ -132,7 +132,7 @@ def test_filter_precedence_status_and_legacy_params(client, monkeypatch, app_mod
     monkeypatch.setattr(app_module, "apply_filters", spy_apply_filters)
 
     resp = client.get(
-        "/abcd123/download.csv?status=primary&statusFilter=secondary&groupFilter=G&supplierFilter=S"
+        "/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download.csv?status=primary&statusFilter=secondary&groupFilter=G&supplierFilter=S"
     )
     assert resp.status_code == 200
 

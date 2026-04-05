@@ -32,6 +32,7 @@ from flask_login import (
 from authlib.integrations.flask_client import OAuth
 from flask_wtf.csrf import CSRFProtect
 from concurrent.futures import ThreadPoolExecutor
+import re
 import requests
 import sentry_sdk
 from sentry_sdk.integrations.flask import FlaskIntegration
@@ -229,6 +230,36 @@ def create_app(testing: bool = False) -> tuple[Flask, str]:
         finally:
             conn.close()
 
+    @app.cli.command("purge-jobs")
+    @click.option("--days", default=30, help="Delete jobs older than N days (default 30)")
+    @click.option("--confirm", is_flag=True, help="Actually delete (dry-run without this flag)")
+    def purge_jobs_cmd(days, confirm):
+        """Remove completed/failed jobs older than N days."""
+        db_path = app.config["DATABASE"]
+        conn = sqlite3.connect(db_path, timeout=30)
+        try:
+            cur = conn.execute(
+                "SELECT COUNT(*) FROM jobs WHERE status IN ('completed','failed') "
+                "AND updated_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+            count = cur.fetchone()[0]
+            if count == 0:
+                click.echo("No old jobs to purge.")
+                return
+            if not confirm:
+                click.echo(f"Would delete {count} jobs older than {days} days. Pass --confirm to execute.")
+                return
+            conn.execute(
+                "DELETE FROM jobs WHERE status IN ('completed','failed') "
+                "AND updated_at < datetime('now', ?)",
+                (f"-{days} days",),
+            )
+            conn.commit()
+            click.echo(f"Purged {count} jobs.")
+        finally:
+            conn.close()
+
     @atexit.register
     def _shutdown_executor():
         ex = getattr(app, "executor", None)
@@ -242,6 +273,15 @@ def create_app(testing: bool = False) -> tuple[Flask, str]:
     with app.app_context():
         conn = get_db()
         run_migrations(conn, make_backup=True, logger=app.logger)
+
+    # Validate obfuscated_id format on any route that uses it
+    _OBFUSCATED_ID_RE = re.compile(r"^[a-f0-9]{32}$")
+
+    @app.before_request
+    def _validate_obfuscated_id():
+        obf_id = (request.view_args or {}).get("obfuscated_id")
+        if obf_id is not None and not _OBFUSCATED_ID_RE.match(obf_id):
+            abort(404)
 
     # Close DB per request
     @app.teardown_appcontext

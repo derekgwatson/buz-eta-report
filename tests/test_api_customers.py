@@ -2,7 +2,7 @@
 import json
 
 
-def _make_row(id=1, dd="Acme DD", cbr="Acme CBR", obf="abc123", ft="Customer Name", dn="Acme"):
+def _make_row(id=1, dd="Acme DD", cbr="Acme CBR", obf="aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", ft="Customer Name", dn="Acme"):
     """Create a fake sqlite3.Row-like dict for monkeypatching."""
 
     class Row(dict):
@@ -53,16 +53,16 @@ def test_get_customer_found(client, monkeypatch, api_headers):
         return [row]
 
     monkeypatch.setattr("api.customers.query_db", fake_query, raising=True)
-    r = client.get("/api/v1/customers/abc123", headers=api_headers)
+    r = client.get("/api/v1/customers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", headers=api_headers)
     assert r.status_code == 200
-    assert r.get_json()["data"]["obfuscated_id"] == "abc123"
+    assert r.get_json()["data"]["obfuscated_id"] == "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
 
 
 def test_get_customer_not_found(client, monkeypatch, api_headers):
     monkeypatch.setattr(
         "api.customers.query_db", lambda *a, **k: None, raising=True
     )
-    r = client.get("/api/v1/customers/nonexistent", headers=api_headers)
+    r = client.get("/api/v1/customers/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", headers=api_headers)
     assert r.status_code == 404
     assert r.get_json()["code"] == "NOT_FOUND"
 
@@ -70,7 +70,7 @@ def test_get_customer_not_found(client, monkeypatch, api_headers):
 # ---------- CREATE ----------
 
 def test_create_customer_success(client, monkeypatch, api_headers):
-    created_row = _make_row(obf="new-obf-id", dd="Test DD", cbr=None, dn="Test DD")
+    created_row = _make_row(obf="cccccccccccccccccccccccccccccccc", dd="Test DD", cbr=None, dn="Test DD")
     call_count = {"n": 0}
 
     def fake_query(sql, args=(), one=False, **kw):
@@ -157,7 +157,7 @@ def test_update_customer_success(client, monkeypatch, api_headers):
 
     monkeypatch.setattr("api.customers.query_db", fake_query, raising=True)
     r = client.put(
-        "/api/v1/customers/abc123",
+        "/api/v1/customers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
         headers=api_headers,
         data=json.dumps({"dd_name": "New DD"}),
     )
@@ -169,7 +169,7 @@ def test_update_customer_not_found(client, monkeypatch, api_headers):
         "api.customers.query_db", lambda *a, **k: None, raising=True
     )
     r = client.put(
-        "/api/v1/customers/nope",
+        "/api/v1/customers/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
         headers=api_headers,
         data=json.dumps({"dd_name": "X"}),
     )
@@ -191,7 +191,7 @@ def test_delete_customer_success(client, monkeypatch, api_headers):
         return []
 
     monkeypatch.setattr("api.customers.query_db", fake_query, raising=True)
-    r = client.delete("/api/v1/customers/abc123", headers=api_headers)
+    r = client.delete("/api/v1/customers/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", headers=api_headers)
     assert r.status_code == 204
     assert r.data == b""
 
@@ -200,5 +200,5 @@ def test_delete_customer_not_found(client, monkeypatch, api_headers):
     monkeypatch.setattr(
         "api.customers.query_db", lambda *a, **k: None, raising=True
     )
-    r = client.delete("/api/v1/customers/nope", headers=api_headers)
+    r = client.delete("/api/v1/customers/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", headers=api_headers)
     assert r.status_code == 404

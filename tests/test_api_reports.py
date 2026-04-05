@@ -27,7 +27,7 @@ def test_generate_report_returns_job_id(client, monkeypatch, api_headers):
     monkeypatch.setattr(client.application, "executor", FakeExecutor())
 
     r = client.post(
-        "/api/v1/reports/abc123/generate", headers=api_headers
+        "/api/v1/reports/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/generate", headers=api_headers
     )
     assert r.status_code == 202
     data = r.get_json()["data"]
@@ -40,7 +40,7 @@ def test_generate_report_customer_not_found(client, monkeypatch, api_headers):
         "api.reports.query_db", lambda *a, **kw: None, raising=True
     )
     r = client.post(
-        "/api/v1/reports/nonexistent/generate", headers=api_headers
+        "/api/v1/reports/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/generate", headers=api_headers
     )
     assert r.status_code == 404
 
@@ -55,7 +55,7 @@ def test_download_csv(client, monkeypatch, api_headers):
         raising=True,
     )
     r = client.get(
-        "/api/v1/reports/abc123/download?format=csv", headers=api_headers
+        "/api/v1/reports/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download?format=csv", headers=api_headers
     )
     assert r.status_code == 200
     assert r.content_type == "text/csv; charset=utf-8"
@@ -72,7 +72,7 @@ def test_download_xlsx(client, monkeypatch, api_headers):
         raising=True,
     )
     r = client.get(
-        "/api/v1/reports/abc123/download?format=xlsx", headers=api_headers
+        "/api/v1/reports/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download?format=xlsx", headers=api_headers
     )
     assert r.status_code == 200
     assert "spreadsheetml" in r.content_type
@@ -85,7 +85,7 @@ def test_download_invalid_format(client, monkeypatch, api_headers):
         raising=True,
     )
     r = client.get(
-        "/api/v1/reports/abc123/download?format=pdf", headers=api_headers
+        "/api/v1/reports/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download?format=pdf", headers=api_headers
     )
     assert r.status_code == 400
     assert r.get_json()["code"] == "BAD_REQUEST"
@@ -98,7 +98,7 @@ def test_download_customer_not_found(client, monkeypatch, api_headers):
         raising=True,
     )
     r = client.get(
-        "/api/v1/reports/nonexistent/download?format=csv", headers=api_headers
+        "/api/v1/reports/bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb/download?format=csv", headers=api_headers
     )
     assert r.status_code == 404
 
@@ -126,7 +126,7 @@ def test_download_with_filters(client, monkeypatch, api_headers):
     monkeypatch.setattr("api.reports.apply_filters", capture_filters, raising=True)
 
     r = client.get(
-        "/api/v1/reports/abc123/download?format=csv&status=Open&group=Cutting&supplier=DD",
+        "/api/v1/reports/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download?format=csv&status=Open&group=Cutting&supplier=DD",
         headers=api_headers,
     )
     assert r.status_code == 200
@@ -144,7 +144,7 @@ def test_download_default_format_is_csv(client, monkeypatch, api_headers):
         raising=True,
     )
     r = client.get(
-        "/api/v1/reports/abc123/download", headers=api_headers
+        "/api/v1/reports/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa/download", headers=api_headers
     )
     assert r.status_code == 200
     assert r.content_type == "text/csv; charset=utf-8"

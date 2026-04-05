@@ -223,7 +223,7 @@ def test_download_csv(client, monkeypatch):
     monkeypatch.setattr("app.to_csv_bytes", lambda rows, headers: b"RefNo,Foo\nR1,Bar\n", raising=True)
     monkeypatch.setattr("app.safe_base_filename", lambda s: "acme", raising=True)
 
-    r = client.get("/some-obf/download.csv")
+    r = client.get("/aabbccdd11223344aabbccdd11223344/download.csv")
     assert r.status_code == 200
     assert r.mimetype == "text/csv"
     assert b"RefNo,Foo" in r.data
@@ -237,7 +237,7 @@ def test_download_xlsx(client, monkeypatch):
     monkeypatch.setattr("app.to_excel_bytes", lambda rows, headers: b"PK\x03\x04DUMMY", raising=True)  # XLSX zip header starts with PK
     monkeypatch.setattr("app.safe_base_filename", lambda s: "bravo", raising=True)
 
-    r = client.get("/some-obf/download.xlsx")
+    r = client.get("/aabbccdd11223344aabbccdd11223344/download.xlsx")
     assert r.status_code == 200
     assert r.mimetype == "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
     assert r.data.startswith(b"PK\x03\x04")
