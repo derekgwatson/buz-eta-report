@@ -96,8 +96,9 @@ def _configure_logging(app: Flask) -> None:
     app.logger.setLevel(app.config.get("LOG_LEVEL", "INFO"))
 
 
-_recent_errors: dict[str, float] = {}
 _DEDUP_WINDOW = 60  # seconds — suppress duplicate events within this window
+_DEDUP_MAX_KEYS = 200  # hard cap on tracked keys to bound memory
+_recent_errors: dict[str, float] = {}
 
 
 def _before_send(event, hint):
@@ -109,16 +110,23 @@ def _before_send(event, hint):
         key = event.get("message") or event.get("event_id") or ""
 
     now = time.monotonic()
-    last_seen = _recent_errors.get(key)
-    if last_seen and (now - last_seen) < _DEDUP_WINDOW:
-        return None  # drop duplicate
-    _recent_errors[key] = now
 
-    # Prune stale entries to prevent unbounded growth
+    # Prune expired entries first so the check and cap are always current
     cutoff = now - _DEDUP_WINDOW
     stale = [k for k, v in _recent_errors.items() if v < cutoff]
     for k in stale:
         _recent_errors.pop(k, None)
+
+    # If still over the cap after pruning, drop the oldest entries
+    if len(_recent_errors) >= _DEDUP_MAX_KEYS:
+        oldest = sorted(_recent_errors, key=_recent_errors.get)[:len(_recent_errors) - _DEDUP_MAX_KEYS + 1]
+        for k in oldest:
+            _recent_errors.pop(k, None)
+
+    last_seen = _recent_errors.get(key)
+    if last_seen and (now - last_seen) < _DEDUP_WINDOW:
+        return None  # drop duplicate
+    _recent_errors[key] = now
 
     # Scrub PII: drop request bodies and emails
     req = event.get("request") or {}
