@@ -315,3 +315,64 @@ def test_favicon_and_robots(client, monkeypatch):
     monkeypatch.setattr("app.send_from_directory", lambda *a, **k: Response(b"ok", mimetype="text/plain"), raising=True)
     assert client.get("/favicon.ico").status_code == 200
     assert client.get("/robots.txt").status_code == 200
+
+
+# ---------- Logout ----------
+
+def test_logout_redirects_unauthenticated(client):
+    """Unauthenticated users hitting /logout get redirected to login."""
+    r = client.get("/logout", follow_redirects=False)
+    assert r.status_code == 302
+
+
+def test_logout_renders_home(client, logged_in_admin):
+    """Authenticated user hitting /logout sees home page."""
+    r = client.get("/logout")
+    assert r.status_code == 200
+
+
+# ---------- Sync report route ----------
+
+def test_sync_report_happy_path(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.build_eta_report_context",
+        lambda obf_id, db=None: ("report.html", {"customer_name": "Test", "obfuscated_id": obf_id}, 200),
+        raising=True,
+    )
+    r = client.get("/sync/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    assert r.status_code == 200
+
+
+def test_sync_report_customer_not_found(client, monkeypatch):
+    monkeypatch.setattr(
+        "app.build_eta_report_context",
+        lambda obf_id, db=None: ("404.html", {"message": "Not found"}, 404),
+        raising=True,
+    )
+    r = client.get("/sync/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    assert r.status_code == 404
+
+
+def test_sync_report_api_failure(client, monkeypatch):
+    import requests as req_lib
+
+    def _boom(*a, **kw):
+        raise req_lib.exceptions.ConnectionError("OData down")
+
+    monkeypatch.setattr("app.build_eta_report_context", _boom, raising=True)
+    r = client.get("/sync/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
+    assert r.status_code == 500
+
+
+# ---------- obfuscated_id validation ----------
+
+def test_invalid_obfuscated_id_returns_404(client):
+    """Non-hex or wrong-length obfuscated_id should 404 at the before_request hook."""
+    r = client.get("/not-a-hex-id")
+    assert r.status_code == 404
+
+    r = client.get("/sync/ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ")
+    assert r.status_code == 404
+
+    r = client.get("/sync/abc")
+    assert r.status_code == 404

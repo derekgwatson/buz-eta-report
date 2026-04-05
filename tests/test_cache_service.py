@@ -10,7 +10,6 @@ from __future__ import annotations
 import json
 import os
 import sqlite3
-import time
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from unittest.mock import MagicMock
@@ -100,7 +99,6 @@ def test_set_cache_with_metadata(temp_db):
 def test_set_cache_updates_existing_entry(temp_db):
     """Setting the same key twice updates the entry."""
     set_cache("update_test", {"v": 1}, conn=temp_db)
-    time.sleep(0.1)  # Ensure timestamp differs
     set_cache("update_test", {"v": 2}, conn=temp_db)
 
     entry = get_cache("update_test", conn=temp_db)

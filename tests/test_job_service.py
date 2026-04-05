@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-import time
+
 from typing import Any
 
 import pytest
@@ -348,12 +348,15 @@ def test_update_job_updates_timestamp(temp_db):
     """update_job updates the updated_at timestamp."""
     create_job("job13", db=temp_db)
 
-    # Get initial timestamp
+    # Backdate the initial timestamp so we don't need to sleep
+    temp_db.execute(
+        "UPDATE jobs SET updated_at = datetime('now', '-10 seconds') WHERE id = ?",
+        ("job13",),
+    )
+    temp_db.commit()
     cursor = temp_db.execute("SELECT updated_at FROM jobs WHERE id = ?", ("job13",))
     initial_ts = cursor.fetchone()["updated_at"]
 
-    # Sleep for at least 1 second (SQLite CURRENT_TIMESTAMP has second precision)
-    time.sleep(1.1)
     update_job("job13", message="Update", db=temp_db)
 
     cursor = temp_db.execute("SELECT updated_at FROM jobs WHERE id = ?", ("job13",))
