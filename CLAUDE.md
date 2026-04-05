@@ -78,6 +78,13 @@ flask prewarm-cache
 flask prewarm-cache --instance DD --instance CBR
 ```
 
+### Maintenance
+```bash
+# Purge completed/failed jobs older than 30 days (dry-run by default)
+flask purge-jobs
+flask purge-jobs --days 7 --confirm
+```
+
 ## Architecture
 
 ### Multi-Instance OData Architecture
@@ -147,9 +154,13 @@ Production statuses from OData can be mapped to custom display names:
 ### Export System (services/export.py)
 Downloads support filtering and scrubbing:
 - **Filters**: status, group (Customer Group), supplier
-- **Scrubbing**: `scrub_sensitive()` removes columns like Descn, Notes, BarcodeNo before export
+- **Scrubbing**: `scrub_sensitive()` removes columns matching cost/margin/buy/wholesale/markup/cogs/pkid patterns
 - **Headers**: `ordered_headers()` ensures consistent column order
 - **Formats**: XLSX (via pandas/openpyxl) and CSV
+- **Formula injection prevention**: `_sanitize_for_excel()` prefixes dangerous values (`=`, `+`, `-`, `@`) with `'`
+
+### Finished Status Filtering (services/buz_data.py)
+Orders where ALL lines have a terminal status are excluded from reports. Terminal statuses are defined in `FINISHED_STATUSES` at the top of `buz_data.py`. Update that frozenset when new terminal statuses are added in OData.
 
 ## Important Implementation Details
 
@@ -167,10 +178,13 @@ The `field_type` column in customers table determines data fetching:
 Both use different OData filters but return the same data structure.
 
 ### Error Handling
-- Sentry integration with `before_send` hook to scrub sensitive data
+- Sentry integration with `before_send` hook to scrub sensitive data and deduplicate errors (60s window, max 200 tracked keys)
 - Dev mode: raises exceptions for debugging
 - Prod mode: returns error templates (400.html, 403.html, 404.html, 500.html, etc.)
 - Job errors captured with `update_job(job_id, error=str(exc))`
+
+### URL Validation
+All routes accepting `<obfuscated_id>` are validated by a `before_request` hook — only 32-character lowercase hex strings (UUID hex format) are accepted. Invalid IDs return 404.
 
 ### Authentication
 - Google OAuth via Authlib
@@ -191,6 +205,9 @@ def test_route(client, logged_in_admin):
     resp = client.get("/admin")
     assert resp.status_code == 200
 ```
+
+### CI
+GitHub Actions runs `pytest` on push and PR to `main` against Python 3.11 and 3.12. See `.github/workflows/ci.yml`.
 
 ## Environment Variables
 
@@ -220,3 +237,7 @@ Optional:
 5. **Job progress**: Never let `progress()` callbacks break the main job; wrap in try/except
 6. **Cache keys**: Use descriptive prefixes like `statuses:{instance}` or `orders:{customer}:{instance}`
 7. **Timezone**: The app uses `Australia/Sydney` timezone for scheduling (see `prewarm.sh`)
+8. **Job log updates**: `update_job()` uses atomic `json_insert` in SQLite — do not read-modify-write the log column
+9. **obfuscated_id format**: Must be a 32-char lowercase hex string (UUID hex). Validated by `before_request` hook
+10. **User input validation**: `/add_user` validates email contains `@`, name is non-empty, and role is in `{"admin", "user"}`
+11. **OData logging**: Filter queries are NOT logged (PII risk). Only the endpoint URL and filter count are logged

@@ -229,10 +229,10 @@ Needs work:
 | GET | `/api/v1/health` | Health check |
 
 ### Implementation
-- Flask Blueprint in `routes/api.py` at `/api/v1`
-- `@api_key_required` decorator checks `X-API-Key` header against `API_KEY` env var
-- JSON envelope: `{"data": ...}` for success, `{"error": "message"}` for errors
-- 10 tests in `tests/test_api.py`
+- Flask Blueprint in `api/` package at `/api/v1`
+- `@api_key_required` decorator checks `X-API-Key` header against `BUZ_API_KEY` env var (HMAC comparison)
+- JSON envelope: `{"data": ...}` for success, `{"error": "message", "code": "ERROR_CODE"}` for errors
+- Tests across `tests/test_api_*.py`
 
 ## Next Steps
 
