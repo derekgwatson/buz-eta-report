@@ -96,13 +96,39 @@ def _configure_logging(app: Flask) -> None:
     app.logger.setLevel(app.config.get("LOG_LEVEL", "INFO"))
 
 
+_recent_errors: dict[str, float] = {}
+_DEDUP_WINDOW = 60  # seconds — suppress duplicate events within this window
+
+
 def _before_send(event, hint):
-    # drop request bodies and emails
+    # Deduplicate: suppress repeated identical errors within the window
+    exc_info = hint.get("exc_info")
+    if exc_info:
+        key = f"{exc_info[0].__name__}:{exc_info[1]}"
+    else:
+        key = event.get("message") or event.get("event_id") or ""
+
+    now = time.monotonic()
+    last_seen = _recent_errors.get(key)
+    if last_seen and (now - last_seen) < _DEDUP_WINDOW:
+        return None  # drop duplicate
+    _recent_errors[key] = now
+
+    # Prune stale entries to prevent unbounded growth
+    cutoff = now - _DEDUP_WINDOW
+    stale = [k for k, v in _recent_errors.items() if v < cutoff]
+    for k in stale:
+        _recent_errors.pop(k, None)
+
+    # Scrub PII: drop request bodies and emails
     req = event.get("request") or {}
-    if "data" in req: req["data"] = "[filtered]"
+    if "data" in req:
+        req["data"] = "[filtered]"
     user = event.get("user") or {}
-    if "email" in user: user["email"] = "[filtered]"
-    event["request"] = req; event["user"] = user
+    if "email" in user:
+        user["email"] = "[filtered]"
+    event["request"] = req
+    event["user"] = user
     return event
 
 
