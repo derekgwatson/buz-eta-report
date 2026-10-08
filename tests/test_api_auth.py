@@ -23,8 +23,20 @@ def test_valid_api_key_succeeds(client, monkeypatch, api_headers):
     assert r.status_code == 200
 
 
+def test_api_key_env_name_used_on_live_server(client, monkeypatch):
+    """The live .env names it API_KEY; the API must accept that name."""
+    monkeypatch.delenv("BUZ_API_KEY")
+    monkeypatch.setenv("API_KEY", "live-key")
+    monkeypatch.setattr(
+        "api.customers.query_db", lambda *a, **k: [], raising=True
+    )
+    r = client.get("/api/v1/customers", headers={"X-API-Key": "live-key"})
+    assert r.status_code == 200
+
+
 def test_no_buz_api_key_configured_returns_500(client, monkeypatch):
     monkeypatch.delenv("BUZ_API_KEY")
+    monkeypatch.delenv("API_KEY", raising=False)
     r = client.get(
         "/api/v1/customers", headers={"X-API-Key": "anything"}
     )

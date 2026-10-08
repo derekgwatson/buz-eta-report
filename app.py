@@ -46,7 +46,7 @@ from services.database import (
     create_db_tables,
 )
 from services.migrations import run_migrations
-from services.eta_report import build_eta_report_context
+from services.eta_report import build_eta_report_context, _fetch_customer_row
 from services.buz_data import get_data_by_order_no, get_open_orders, get_open_orders_by_group
 from services.job_service import create_job, update_job, get_job
 
@@ -274,15 +274,6 @@ def create_app(testing: bool = False) -> tuple[Flask, str]:
         conn = get_db()
         run_migrations(conn, make_backup=True, logger=app.logger)
 
-    # Validate obfuscated_id format on any route that uses it
-    _OBFUSCATED_ID_RE = re.compile(r"^[a-f0-9]{32}$")
-
-    @app.before_request
-    def _validate_obfuscated_id():
-        obf_id = (request.view_args or {}).get("obfuscated_id")
-        if obf_id is not None and not _OBFUSCATED_ID_RE.match(obf_id):
-            abort(404)
-
     # Close DB per request
     @app.teardown_appcontext
     def close_db(_exc):
@@ -487,7 +478,12 @@ def _run_eta_report_job(job_id: str, obfuscated_id: str) -> None:
 @app.route("/<obfuscated_id>")
 @app.route("/etas/<obfuscated_id>")
 def eta_report(obfuscated_id: str):
-    _ = get_db()  # ensure g.db bound
+    db = get_db()  # ensure g.db bound
+    # This route matches ANY single-segment path, so internet scanners probing
+    # /.env, /1337.php etc. land here. Refuse unknown IDs up front instead of
+    # creating a job row and running a background job for each one.
+    if not _fetch_customer_row(obfuscated_id, db=db):
+        return render_template("404.html", message="Report not found"), 404
     job_id = str(uuid.uuid4())
     create_job(job_id)  # uses g.db
     get_executor().submit(_run_eta_report_job, job_id, obfuscated_id)

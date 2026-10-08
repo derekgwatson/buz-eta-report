@@ -48,7 +48,7 @@ pytest tests/test_routes.py::test_admin_page
 ### API
 The `/api/v1/` REST API is implemented as a Flask Blueprint in the `api/` package.
 
-**Authentication**: API key via `X-API-Key` header. Set `BUZ_API_KEY` environment variable.
+**Authentication**: API key via `X-API-Key` header. Set `API_KEY` environment variable (`BUZ_API_KEY` also accepted).
 
 **Endpoints**:
 | Method | Endpoint | Purpose |
@@ -184,7 +184,7 @@ Both use different OData filters but return the same data structure.
 - Job errors captured with `update_job(job_id, error=str(exc))`
 
 ### URL Validation
-All routes accepting `<obfuscated_id>` are validated by a `before_request` hook — only 32-character lowercase hex strings (UUID hex format) are accepted. Invalid IDs return 404.
+There is NO format check on `<obfuscated_id>`: live customers use two formats (older 11-char base64-ish like `0YOxD-9kqY4`, newer 32-char hex), and a 32-hex-only rule would 404 two thirds of real links. Instead, the catch-all `eta_report` route (`/<obfuscated_id>`) looks the ID up in `customers` before creating a job, so scanner probes (`/.env`, `/1337.php`) get a 404 without a job row or background job.
 
 ### Authentication
 - Google OAuth via Authlib
@@ -226,7 +226,7 @@ Production-only:
 Optional:
 - `APP_ENV`: Environment (development/production/staging)
 - `SENTRY_DISABLED`: Set to "1" to disable Sentry
-- `BUZ_API_KEY`: API key for REST API authentication (required for /api/v1/* endpoints except /health)
+- `API_KEY` (or `BUZ_API_KEY`): API key for REST API authentication (required for /api/v1/* endpoints except /health)
 
 ## Common Gotchas
 
@@ -238,6 +238,6 @@ Optional:
 6. **Cache keys**: Use descriptive prefixes like `statuses:{instance}` or `orders:{customer}:{instance}`
 7. **Timezone**: The app uses `Australia/Sydney` timezone for scheduling (see `prewarm.sh`)
 8. **Job log updates**: `update_job()` uses atomic `json_insert` in SQLite — do not read-modify-write the log column
-9. **obfuscated_id format**: Must be a 32-char lowercase hex string (UUID hex). Validated by `before_request` hook
+9. **obfuscated_id format**: Two formats are live (11-char legacy and 32-char hex) — never add a format check; validate by looking the ID up in `customers`
 10. **User input validation**: `/add_user` validates email contains `@`, name is non-empty, and role is in `{"admin", "user"}`
 11. **OData logging**: Filter queries are NOT logged (PII risk). Only the endpoint URL and filter count are logged

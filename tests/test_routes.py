@@ -366,13 +366,39 @@ def test_sync_report_api_failure(client, monkeypatch):
 
 # ---------- obfuscated_id validation ----------
 
-def test_invalid_obfuscated_id_returns_404(client):
-    """Non-hex or wrong-length obfuscated_id should 404 at the before_request hook."""
-    r = client.get("/not-a-hex-id")
-    assert r.status_code == 404
+def test_legacy_short_obfuscated_id_is_accepted(client, monkeypatch):
+    """Two thirds of live customers have 11-char IDs like 0YOxD-9kqY4; they must keep working."""
+    monkeypatch.setattr("app._fetch_customer_row", lambda oid, db=None: {"dd_name": "X"}, raising=True)
+    monkeypatch.setattr("app.create_job", lambda job_id: None, raising=True)
 
-    r = client.get("/sync/ZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZZ")
-    assert r.status_code == 404
+    class _Exec:
+        def submit(self, *a, **k):
+            return None
+    monkeypatch.setattr("app.get_executor", lambda: _Exec(), raising=True)
+    for path in ("/0YOxD-9kqY4", "/-MjQqD02IV8", "/etas/0YOxD-9kqY4"):
+        assert client.get(path).status_code == 200, path
 
-    r = client.get("/sync/abc")
-    assert r.status_code == 404
+
+def test_eta_report_unknown_id_404s_without_creating_job(client, monkeypatch):
+    # Scanners probe /.env, /1337.php etc.; these must not create jobs.
+    monkeypatch.setattr("app._fetch_customer_row", lambda oid, db=None: None, raising=True)
+    created = []
+    monkeypatch.setattr("app.create_job", lambda job_id: created.append(job_id), raising=True)
+    for path in ("/1337.php", "/.env", "/etas/nope"):
+        r = client.get(path)
+        assert r.status_code == 404, path
+    assert created == []
+
+
+def test_eta_report_known_id_starts_job(client, monkeypatch):
+    monkeypatch.setattr("app._fetch_customer_row", lambda oid, db=None: {"dd_name": "X"}, raising=True)
+    created = []
+    monkeypatch.setattr("app.create_job", lambda job_id: created.append(job_id), raising=True)
+
+    class _Exec:
+        def submit(self, *a, **k):
+            return None
+    monkeypatch.setattr("app.get_executor", lambda: _Exec(), raising=True)
+    r = client.get("/abc123")
+    assert r.status_code == 200
+    assert len(created) == 1

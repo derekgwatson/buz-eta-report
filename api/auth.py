@@ -12,9 +12,10 @@ def api_key_required(f):
 
     @wraps(f)
     def decorated(*args, **kwargs):
-        api_key = os.environ.get("BUZ_API_KEY")
+        # Live .env (and .env.example) use API_KEY; BUZ_API_KEY is accepted too.
+        api_key = os.environ.get("API_KEY") or os.environ.get("BUZ_API_KEY")
         if not api_key:
-            current_app.logger.error("BUZ_API_KEY not configured")
+            current_app.logger.error("API_KEY not configured")
             return error_response(
                 "API key not configured on server",
                 "SERVER_CONFIG_ERROR",
