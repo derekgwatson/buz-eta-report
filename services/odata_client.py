@@ -1,4 +1,5 @@
 from datetime import datetime
+import json
 import os
 import requests
 from requests.auth import HTTPBasicAuth
@@ -38,6 +39,31 @@ def _session_with_retries() -> requests.Session:
     return s
 
 
+# The Buz logins bot-team's Banji, Hugo and Owen use, one file per org. Reading the same
+# files means a Buz password change is made in ONE place (2026-10-13: a Wollongong change
+# reached Banji but not Owen, which was refused by Buz for a day). Read on every client,
+# so a changed password needs no restart.
+_SHARED_CREDENTIAL_ORGS = {'DD': 'dd', 'CBR': 'canberra'}
+
+
+def _load_credentials(source: str):
+    """Return (username, password) for a source: shared credentials file first,
+    BUZ_<SOURCE>_USERNAME / _PASSWORD env vars as the fallback."""
+    secrets_dir = os.getenv("BUZ_CREDENTIALS_DIR", "/var/www/bot-team/.secrets/buz")
+    path = os.path.join(secrets_dir, f"buz_credentials_{_SHARED_CREDENTIAL_ORGS[source]}.json")
+    try:
+        with open(path, encoding="utf-8") as f:
+            creds = json.load(f)
+        if creds.get("username") and creds.get("password"):
+            return creds["username"], creds["password"]
+        logging.warning("Shared Buz credentials file %s lacks username/password; using env", path)
+    except FileNotFoundError:
+        pass
+    except (OSError, ValueError) as e:
+        logging.warning("Could not read shared Buz credentials %s (%s); using env", path, e)
+    return os.getenv(f"BUZ_{source}_USERNAME"), os.getenv(f"BUZ_{source}_PASSWORD")
+
+
 class ODataClient:
     """
     Encapsulates a connection to an OData source.
@@ -57,14 +83,11 @@ class ODataClient:
         """
         if source == 'DD':
             self.root_url = "https://api.buzmanager.com/reports/DESDR"
-            self.username = os.getenv("BUZ_DD_USERNAME")
-            self.password = os.getenv("BUZ_DD_PASSWORD")
         elif source == 'CBR':
             self.root_url = "https://api.buzmanager.com/reports/WATSO"
-            self.username = os.getenv("BUZ_CBR_USERNAME")
-            self.password = os.getenv("BUZ_CBR_PASSWORD")
         else:
             raise ValueError(f"Unrecognised source: {source}")
+        self.username, self.password = _load_credentials(source)
 
         # Check if required environment variables are loaded
         if not self.username or not self.password:

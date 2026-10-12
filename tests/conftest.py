@@ -21,6 +21,8 @@ def _env(monkeypatch, tmp_path):
     monkeypatch.setenv("BUZ_DD_PASSWORD", "test-dd-pass")
     monkeypatch.setenv("BUZ_CBR_USERNAME", "test-cbr-user")
     monkeypatch.setenv("BUZ_CBR_PASSWORD", "test-cbr-pass")
+    # Never read the real shared Buz credentials files (they exist on the server)
+    monkeypatch.setenv("BUZ_CREDENTIALS_DIR", str(tmp_path / "no-shared-creds"))
     # API key for testing
     monkeypatch.setenv("BUZ_API_KEY", "test-api-key-12345")
     # silence Sentry during tests
